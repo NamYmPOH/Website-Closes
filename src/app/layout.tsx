@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import AuthProvider from "@/components/providers/AuthProvider";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -20,7 +21,7 @@ export default function RootLayout({
   return (
     <html lang="vi" className="scroll-smooth">
       <body className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-foreground selection:text-background">
-        {children}
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );
