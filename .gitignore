@@ -45,6 +45,8 @@ lerna-debug.log*
 # IDE & Editor settings
 .vscode/
 .idea/
+.agents/
+skills-lock.json
 *.suo
 *.ntvs*
 *.njsproj
