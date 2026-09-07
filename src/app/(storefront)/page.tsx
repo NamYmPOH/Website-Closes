@@ -37,7 +37,12 @@ export default function StorefrontPage() {
       .then((data) => {
         if (!isMounted) return;
         if (data && data.items && data.items.length >= 4) {
-          setFlashSaleProducts(data.items);
+          const sanitized = data.items.map((item: any) => ({
+            ...item,
+            brand: typeof item.brand === "object" ? item.brand?.name : item.brand,
+            category: typeof item.category === "object" ? item.category?.name : item.category,
+          }));
+          setFlashSaleProducts(sanitized);
         }
       })
       .catch(() => {});
@@ -48,7 +53,12 @@ export default function StorefrontPage() {
       .then((data) => {
         if (!isMounted) return;
         if (data && data.items && data.items.length >= 4) {
-          setNewArrivals(data.items);
+          const sanitized = data.items.map((item: any) => ({
+            ...item,
+            brand: typeof item.brand === "object" ? item.brand?.name : item.brand,
+            category: typeof item.category === "object" ? item.category?.name : item.category,
+          }));
+          setNewArrivals(sanitized);
         }
       })
       .catch(() => {});

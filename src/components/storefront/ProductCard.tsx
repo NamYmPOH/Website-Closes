@@ -12,8 +12,8 @@ export interface ProductItem {
   basePrice: number;
   compareAtPrice?: number | null;
   primaryImage: string;
-  category?: string;
-  brand?: string;
+  category?: any;
+  brand?: any;
   badges?: {
     isNew?: boolean;
     isOutOfStock?: boolean;
@@ -48,6 +48,20 @@ export default function ProductCard({
     : null;
 
   const isOutOfStock = product.badges?.isOutOfStock;
+
+  const brandName =
+    typeof product.brand === "object"
+      ? (product.brand as any)?.name
+      : typeof product.brand === "string"
+      ? product.brand
+      : null;
+
+  const categoryName =
+    typeof product.category === "object"
+      ? (product.category as any)?.name
+      : typeof product.category === "string"
+      ? product.category
+      : null;
 
   if (isListView) {
     return (
@@ -102,14 +116,14 @@ export default function ProductCard({
         <div className="flex-1 flex flex-col justify-between w-full h-full py-1">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              {product.brand && (
+              {brandName && (
                 <span className="text-xs uppercase tracking-wider text-muted font-medium">
-                  {product.brand}
+                  {brandName}
                 </span>
               )}
-              {product.category && (
+              {categoryName && (
                 <span className="text-[11px] px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-muted">
-                  {product.category}
+                  {categoryName}
                 </span>
               )}
             </div>
@@ -218,14 +232,14 @@ export default function ProductCard({
       {/* Product Information */}
       <div className="pt-3 flex flex-col flex-1">
         <div className="flex items-center justify-between mb-0.5">
-          {product.brand && (
+          {brandName && (
             <span className="text-[11px] uppercase tracking-wider text-muted font-medium truncate">
-              {product.brand}
+              {brandName}
             </span>
           )}
-          {product.category && (
+          {categoryName && (
             <span className="text-[10px] text-muted truncate">
-              {product.category}
+              {categoryName}
             </span>
           )}
         </div>

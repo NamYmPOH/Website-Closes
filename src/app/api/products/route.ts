@@ -257,8 +257,8 @@ export async function GET(request: NextRequest) {
             basePrice: Number(item.basePrice),
             compareAtPrice: item.compareAtPrice ? Number(item.compareAtPrice) : null,
             primaryImage: item.images[0]?.url || "/placeholder-product.webp",
-            brand: item.brand,
-            category: item.category,
+            brand: item.brand?.name || null,
+            category: item.category?.name || null,
             averageRating: item.averageRating,
             reviewCount: item.reviewCount,
             badges: {
