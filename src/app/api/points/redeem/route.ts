@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { auth } from "@/lib/auth";
+import { auth } from "@/lib/auth/auth";
 
 // Định nghĩa các gói đổi điểm theo yêu cầu
 const REDEEM_OPTIONS: Record<
