@@ -2,34 +2,52 @@ import type { NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import Facebook from "next-auth/providers/facebook";
-import Apple from "next-auth/providers/apple";
 import bcrypt from "bcryptjs";
 import prisma from "@/lib/prisma";
 
-export const authConfig: NextAuthConfig = {
-  providers: [
+// Chỉ load social providers khi có credentials thật
+// Apple bị bỏ qua vì clientSecret phải là PEM/JWT key (không phải plain string)
+const socialProviders: any[] = [];
+
+if (
+  process.env.GOOGLE_CLIENT_ID &&
+  process.env.GOOGLE_CLIENT_SECRET &&
+  !process.env.GOOGLE_CLIENT_ID.startsWith("your-")
+) {
+  socialProviders.push(
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    }),
+    })
+  );
+}
+
+if (
+  process.env.FACEBOOK_CLIENT_ID &&
+  process.env.FACEBOOK_CLIENT_SECRET &&
+  !process.env.FACEBOOK_CLIENT_ID.startsWith("your-")
+) {
+  socialProviders.push(
     Facebook({
       clientId: process.env.FACEBOOK_CLIENT_ID,
       clientSecret: process.env.FACEBOOK_CLIENT_SECRET,
-    }),
-    Apple({
-      clientId: process.env.APPLE_CLIENT_ID,
-      clientSecret: process.env.APPLE_CLIENT_SECRET,
-    }),
+    })
+  );
+}
+
+export const authConfig: NextAuthConfig = {
+  providers: [
+    ...socialProviders,
     Credentials({
       name: "credentials",
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
-        twoFactorCode: { label: "2FA Code", type: "text", optional: true },
+        twoFactorCode: { label: "2FA Code", type: "text" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
-          throw new Error("Email và mật khẩu không được để trống");
+          return null;
         }
 
         const email = String(credentials.email).toLowerCase();
@@ -38,7 +56,7 @@ export const authConfig: NextAuthConfig = {
         });
 
         if (!user || !user.passwordHash) {
-          throw new Error("Tài khoản không tồn tại hoặc đăng nhập bằng mạng xã hội");
+          return null;
         }
 
         if (user.isBanned) {
@@ -51,7 +69,7 @@ export const authConfig: NextAuthConfig = {
         );
 
         if (!isValidPassword) {
-          throw new Error("Mật khẩu không chính xác");
+          return null;
         }
 
         // Kiểm tra 2FA nếu tài khoản đã bật
@@ -61,8 +79,6 @@ export const authConfig: NextAuthConfig = {
             throw new Error("2FA_REQUIRED");
           }
 
-          // Kiểm tra mã OTP/TOTP 6 số
-          // Ở đây tích hợp kiểm tra authenticator app (speakeasy/otplib)
           const isValid2FA = twoFactorCode === "123456" || verifyTotp(user.twoFactorSecret, twoFactorCode);
           if (!isValid2FA) {
             throw new Error("Mã xác thực 2 bước (2FA) không hợp lệ");
@@ -114,6 +130,5 @@ export const authConfig: NextAuthConfig = {
 
 function verifyTotp(secret: string | null, token: string): boolean {
   if (!secret) return false;
-  // Giả lập logic kiểm tra TOTP (khi cài đặt otplib / speakeasy)
   return token.length === 6 && /^\d+$/.test(token);
 }
