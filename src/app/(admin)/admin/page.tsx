@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import {
@@ -21,46 +21,54 @@ import {
   Clock,
   RotateCcw,
   Check,
+  Loader2,
+  RefreshCw,
 } from "lucide-react";
 import { ALL_PRODUCTS } from "@/lib/products-data";
 
 export default function AdminDashboardPage() {
   const { data: session } = useSession();
 
-  const [orders, setOrders] = useState([
-    {
-      id: "ORD-98214-X9",
-      customer: "Hoàng Long",
-      total: 1210000,
-      status: "PENDING",
-      date: "Hôm nay, 14:32",
-      items: "Áo Thun Cotton (x2)",
-    },
-    {
-      id: "ORD-84112-A1",
-      customer: "Minh Trang",
-      total: 420000,
-      status: "CONFIRMED",
-      date: "Hôm nay, 11:15",
-      items: "Đầm Linen Dáng Suông (x1)",
-    },
-    {
-      id: "ORD-73105-B2",
-      customer: "Văn Đức",
-      total: 790000,
-      status: "SHIPPED",
-      date: "Hôm qua",
-      items: "Quần Trousers Form Đứng (x1)",
-    },
-    {
-      id: "ORD-61209-C3",
-      customer: "Thanh Hằng",
-      total: 1050000,
-      status: "DELIVERED",
-      date: "05/09/2026",
-      items: "Áo Blazer Kẻ Sọc (x1)",
-    },
-  ]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState({
+    totalOrders: 0,
+    pendingOrders: 0,
+    confirmedOrders: 0,
+    shippedOrders: 0,
+    deliveredOrders: 0,
+    totalRevenue: 0,
+  });
+
+  // Tải danh sách đơn hàng thực tế từ database qua API
+  const loadOrders = async () => {
+    try {
+      setOrdersLoading(true);
+      const res = await fetch("/api/orders");
+      if (!res.ok) {
+        throw new Error("Không thể tải danh sách đơn hàng");
+      }
+      const data = await res.json();
+      if (data && Array.isArray(data.orders)) {
+        setOrders(data.orders);
+        if (data.metrics) {
+          setMetrics(data.metrics);
+        }
+      }
+      setOrdersError(null);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "UNKNOWN_ERROR";
+      console.error("[LOAD_ADMIN_ORDERS_ERROR]", msg);
+      setOrdersError("Không thể nạp dữ liệu đơn hàng từ cơ sở dữ liệu.");
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadOrders();
+  }, []);
 
   // Danh sách sản phẩm cảnh báo tồn kho (dưới ngưỡng reorder_threshold)
   const [lowStockProducts, setLowStockProducts] = useState([
@@ -101,39 +109,36 @@ export default function AdminDashboardPage() {
   const [productSuccess, setProductSuccess] = useState(false);
 
   // Cập nhật trạng thái đơn hàng & trigger tự động tồn kho theo Task 1
-  const updateOrderStatus = async (orderId: string, newStatus: string) => {
-    // 1. Gọi API cập nhật trạng thái nếu là đơn hàng thực
+  const updateOrderStatus = async (orderIdentifier: string, newStatus: string) => {
     try {
-      const res = await fetch(`/api/orders/${orderId}/status`, {
+      const res = await fetch(`/api/orders/${orderIdentifier}/status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus.toLowerCase() }),
       });
 
       const data = await res.json();
-      if (data?.alerts && data.alerts.length > 0) {
-        setAlertMessage(data.alerts.join(" | "));
+      if (!res.ok) {
+        setAlertMessage(data.error || "Không thể cập nhật trạng thái đơn hàng");
+      } else {
+        if (data?.alerts && data.alerts.length > 0) {
+          setAlertMessage(data.alerts.join(" | "));
+        } else {
+          if (newStatus === "CONFIRMED") {
+            setAlertMessage(`Đơn hàng #${orderIdentifier} đã xác nhận thanh toán! Đã trừ số lượng tồn kho thực tế.`);
+          } else if (newStatus === "DELIVERED") {
+            setAlertMessage(`Đơn hàng #${orderIdentifier} đã giao thành công! Đã tự động tích lũy điểm thưởng cho khách hàng.`);
+          } else if (newStatus === "CANCELLED" || newStatus === "RETURNED") {
+            setAlertMessage(`Đơn hàng #${orderIdentifier} đã hủy/hoàn trả! Đã hoàn lại số lượng sản phẩm vào kho.`);
+          } else {
+            setAlertMessage(`Đơn hàng #${orderIdentifier} đã chuyển sang trạng thái ${newStatus}.`);
+          }
+        }
+        // Nạp lại danh sách đơn hàng thực tế
+        await loadOrders();
       }
     } catch (e) {
-      // Tiếp tục cập nhật UI state
-    }
-
-    // 2. Cập nhật state nội bộ
-    setOrders((prev) =>
-      prev.map((o) => {
-        if (o.id === orderId) {
-          return { ...o, status: newStatus };
-        }
-        return o;
-      })
-    );
-
-    if (newStatus === "CONFIRMED") {
-      setAlertMessage(`Đơn hàng #${orderId} đã được xác nhận thanh toán! Đã trừ số lượng tồn kho thực tế.`);
-    } else if (newStatus === "DELIVERED") {
-      setAlertMessage(`Đơn hàng #${orderId} đã giao thành công! Đã cộng điểm thưởng khách hàng.`);
-    } else if (newStatus === "CANCELLED" || newStatus === "RETURNED") {
-      setAlertMessage(`Đơn hàng #${orderId} đã hủy/hoàn trả! Đã hoàn lại số lượng sản phẩm vào kho.`);
+      setAlertMessage("Lỗi kết nối khi cập nhật đơn hàng.");
     }
 
     setTimeout(() => setAlertMessage(null), 5000);
@@ -211,41 +216,46 @@ export default function AdminDashboardPage() {
         )}
 
         {/* KPI Metrics Cards */}
+        {/* KPI Metrics Cards (Dữ liệu thực từ Cơ sở dữ liệu) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="p-5 border border-border rounded-xl bg-background space-y-2 shadow-sm">
             <div className="flex justify-between items-center text-muted">
-              <span className="text-xs font-semibold uppercase tracking-wider">Doanh thu tháng này</span>
+              <span className="text-xs font-semibold uppercase tracking-wider">Doanh thu hệ thống</span>
               <DollarSign size={16} />
             </div>
             <div className="flex items-baseline justify-between">
-              <span className="text-2xl font-bold">185.400.000₫</span>
+              <span className="text-2xl font-bold">
+                {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(metrics.totalRevenue)}
+              </span>
               <span className="text-xs text-green-600 font-semibold flex items-center">
-                +14.2% <TrendingUp size={12} className="ml-0.5" />
+                {metrics.deliveredOrders} hoàn thành
               </span>
             </div>
           </div>
 
           <div className="p-5 border border-border rounded-xl bg-background space-y-2 shadow-sm">
             <div className="flex justify-between items-center text-muted">
-              <span className="text-xs font-semibold uppercase tracking-wider">Đơn hàng mới</span>
+              <span className="text-xs font-semibold uppercase tracking-wider">Tổng đơn hàng</span>
               <ShoppingBag size={16} />
             </div>
             <div className="flex items-baseline justify-between">
-              <span className="text-2xl font-bold">48 đơn</span>
-              <span className="text-xs text-green-600 font-semibold flex items-center">
-                +8.1% <TrendingUp size={12} className="ml-0.5" />
+              <span className="text-2xl font-bold">{metrics.totalOrders} đơn</span>
+              <span className="text-xs text-amber-600 font-semibold flex items-center">
+                {metrics.pendingOrders} chờ duyệt
               </span>
             </div>
           </div>
 
           <div className="p-5 border border-border rounded-xl bg-background space-y-2 shadow-sm">
             <div className="flex justify-between items-center text-muted">
-              <span className="text-xs font-semibold uppercase tracking-wider">Khách hàng thành viên</span>
-              <Users size={16} />
+              <span className="text-xs font-semibold uppercase tracking-wider">Đang vận chuyển</span>
+              <Package size={16} />
             </div>
             <div className="flex items-baseline justify-between">
-              <span className="text-2xl font-bold">1,420</span>
-              <span className="text-xs text-muted font-normal">14 VIP tiers</span>
+              <span className="text-2xl font-bold">{metrics.shippedOrders} đơn</span>
+              <span className="text-xs text-blue-600 font-semibold flex items-center">
+                Đang giao hàng
+              </span>
             </div>
           </div>
 
@@ -265,15 +275,28 @@ export default function AdminDashboardPage() {
         <div className="p-6 border border-border rounded-xl bg-background space-y-4 shadow-sm">
           <div className="flex justify-between items-center pb-2">
             <div>
-              <h2 className="text-base font-bold uppercase tracking-tight">Vòng đời Đơn hàng & Cập nhật kho (Task 1)</h2>
+              <h2 className="text-base font-bold uppercase tracking-tight">
+                Toàn bộ Đơn hàng Hệ thống ({orders.length})
+              </h2>
               <p className="text-xs text-muted">
-                Pending (Giữ chỗ) → Confirmed (Trừ kho thật) → Delivering → Completed (Tích điểm) → Cancelled (Hoàn kho)
+                Giám sát đơn của khách đã đăng ký & khách vãng lai • Quản lý vòng đời tồn kho & tích điểm
               </p>
             </div>
-            <span className="text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-2.5 py-1 rounded-full flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              Live Sync API
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={loadOrders}
+                disabled={ordersLoading}
+                className="px-3 py-1 text-xs border border-border rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-800 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={ordersLoading ? "animate-spin" : ""} />
+                Làm mới
+              </button>
+              <span className="text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 px-2.5 py-1 rounded-full flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Database Sync
+              </span>
+            </div>
           </div>
 
           <div className="overflow-x-auto border border-border rounded-lg">
@@ -289,91 +312,161 @@ export default function AdminDashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {orders.map((order) => {
-                  const s = order.status;
-                  return (
-                    <tr key={order.id} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/30 transition">
-                      <td className="p-3 font-mono font-bold">{order.id}</td>
-                      <td className="p-3">{order.customer}</td>
-                      <td className="p-3 text-muted">{order.items}</td>
-                      <td className="p-3 font-semibold">
-                        {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(order.total)}
-                      </td>
-                      <td className="p-3">
-                        <span
-                          className={`px-2.5 py-1 rounded text-[11px] font-semibold inline-flex items-center gap-1 ${
-                            s === "DELIVERED"
-                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                              : s === "SHIPPED"
-                              ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                              : s === "CONFIRMED"
-                              ? "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
-                              : s === "CANCELLED" || s === "RETURNED"
-                              ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
-                              : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                          }`}
-                        >
-                          {s === "DELIVERED" && "Hoàn thành (Cộng điểm)"}
-                          {s === "SHIPPED" && "Đang giao hàng"}
-                          {s === "CONFIRMED" && "Đã trừ kho thật"}
-                          {s === "PENDING" && "Tạm giữ kho (Pending)"}
-                          {(s === "CANCELLED" || s === "RETURNED") && "Đã hủy (Đã hoàn kho)"}
-                        </span>
-                      </td>
-                      <td className="p-3 text-right space-x-1.5">
-                        {s === "PENDING" && (
-                          <>
-                            <button
-                              onClick={() => updateOrderStatus(order.id, "CONFIRMED")}
-                              className="px-2.5 py-1 bg-foreground text-background rounded hover:opacity-90 text-[11px] font-medium cursor-pointer"
-                              title="Xác nhận thanh toán và trừ kho thực tế"
-                            >
-                              Xác nhận & trừ kho
-                            </button>
-                            <button
-                              onClick={() => updateOrderStatus(order.id, "CANCELLED")}
-                              className="px-2.5 py-1 border border-red-300 text-red-600 rounded hover:bg-red-50 text-[11px] cursor-pointer"
-                              title="Hủy đơn và giải phóng số lượng giữ chỗ"
-                            >
-                              Hủy đơn
-                            </button>
-                          </>
-                        )}
+                {ordersLoading ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-muted">
+                      <Loader2 size={18} className="animate-spin inline mr-2 text-foreground" />
+                      Đang tải danh sách đơn hàng từ database...
+                    </td>
+                  </tr>
+                ) : ordersError ? (
+                  <tr>
+                    <td colSpan={6} className="p-6 text-center text-red-600 bg-red-50/50 dark:bg-red-950/20">
+                      <p>{ordersError}</p>
+                      <button
+                        type="button"
+                        onClick={loadOrders}
+                        className="mt-2 px-3 py-1 bg-red-600 text-white rounded text-xs cursor-pointer"
+                      >
+                        Thử lại
+                      </button>
+                    </td>
+                  </tr>
+                ) : orders.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-muted">
+                      Chưa có đơn hàng nào được đặt trong hệ thống.
+                    </td>
+                  </tr>
+                ) : (
+                  orders.map((order) => {
+                    const s = order.status;
+                    const orderId = order.id || order.orderNumber;
+                    const displayCode = order.orderNumber ? `#${order.orderNumber}` : order.id;
+                    const customerDisplay = order.customerName || order.customer || "Khách hàng";
+                    const emailDisplay = order.customerEmail || "";
+                    const totalVal = order.totalAmount ?? order.total ?? 0;
+                    const itemsText = order.itemsSummary || order.items || "Sản phẩm";
 
-                        {s === "CONFIRMED" && (
-                          <button
-                            onClick={() => updateOrderStatus(order.id, "SHIPPED")}
-                            className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[11px] font-medium cursor-pointer"
+                    return (
+                      <tr key={order.id || order.orderNumber} className="hover:bg-neutral-50/50 dark:hover:bg-neutral-900/30 transition">
+                        <td className="p-3 font-mono font-bold">
+                          <div>{displayCode}</div>
+                          {order.createdAt && (
+                            <span className="text-[10px] text-muted font-normal">
+                              {new Date(order.createdAt).toLocaleDateString("vi-VN", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <div className="font-semibold">{customerDisplay}</div>
+                          {emailDisplay && (
+                            <div className="text-[10px] text-muted font-mono">{emailDisplay}</div>
+                          )}
+                          <span
+                            className={`inline-block mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-semibold uppercase ${
+                              order.isGuest
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                                : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                            }`}
                           >
-                            Xuất kho giao hàng
-                          </button>
-                        )}
+                            {order.isGuest ? "Khách vãng lai" : "Thành viên"}
+                          </span>
+                        </td>
+                        <td className="p-3 text-muted max-w-[200px] truncate" title={itemsText}>
+                          {itemsText}
+                        </td>
+                        <td className="p-3 font-semibold">
+                          <div>
+                            {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(totalVal)}
+                          </div>
+                          {order.pointsEarned ? (
+                            <span className="text-[10px] text-emerald-600">
+                              +{order.pointsEarned} pts
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="p-3">
+                          <span
+                            className={`px-2.5 py-1 rounded text-[11px] font-semibold inline-flex items-center gap-1 ${
+                              s === "DELIVERED"
+                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                : s === "SHIPPED"
+                                ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                                : s === "CONFIRMED"
+                                ? "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300"
+                                : s === "CANCELLED" || s === "RETURNED"
+                                ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
+                                : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                            }`}
+                          >
+                            {s === "DELIVERED" && "Hoàn thành (Đã cộng điểm)"}
+                            {s === "SHIPPED" && "Đang giao hàng"}
+                            {s === "CONFIRMED" && "Đã trừ kho thật"}
+                            {s === "PENDING" && "Tạm giữ kho (Pending)"}
+                            {(s === "CANCELLED" || s === "RETURNED") && "Đã hủy (Đã hoàn kho)"}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right space-x-1.5">
+                          {s === "PENDING" && (
+                            <>
+                              <button
+                                onClick={() => updateOrderStatus(orderId, "CONFIRMED")}
+                                className="px-2.5 py-1 bg-foreground text-background rounded hover:opacity-90 text-[11px] font-medium cursor-pointer"
+                                title="Xác nhận thanh toán và trừ kho thực tế"
+                              >
+                                Xác nhận & trừ kho
+                              </button>
+                              <button
+                                onClick={() => updateOrderStatus(orderId, "CANCELLED")}
+                                className="px-2.5 py-1 border border-red-300 text-red-600 rounded hover:bg-red-50 text-[11px] cursor-pointer"
+                                title="Hủy đơn và giải phóng số lượng giữ chỗ"
+                              >
+                                Hủy đơn
+                              </button>
+                            </>
+                          )}
 
-                        {s === "SHIPPED" && (
-                          <>
+                          {s === "CONFIRMED" && (
                             <button
-                              onClick={() => updateOrderStatus(order.id, "DELIVERED")}
-                              className="px-2.5 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-[11px] font-medium cursor-pointer"
-                              title="Giao thành công: finalize và tự động cộng điểm tích lũy"
+                              onClick={() => updateOrderStatus(orderId, "SHIPPED")}
+                              className="px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-[11px] font-medium cursor-pointer"
                             >
-                              Giao thành công
+                              Xuất kho giao hàng
                             </button>
-                            <button
-                              onClick={() => updateOrderStatus(order.id, "RETURNED")}
-                              className="px-2.5 py-1 border border-red-300 text-red-600 rounded hover:bg-red-50 text-[11px] cursor-pointer"
-                            >
-                              Khách hoàn trả
-                            </button>
-                          </>
-                        )}
+                          )}
 
-                        {(s === "DELIVERED" || s === "CANCELLED" || s === "RETURNED") && (
-                          <span className="text-[11px] text-muted italic">Đã kết thúc vòng đời</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                          {s === "SHIPPED" && (
+                            <>
+                              <button
+                                onClick={() => updateOrderStatus(orderId, "DELIVERED")}
+                                className="px-2.5 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700 text-[11px] font-medium cursor-pointer"
+                                title="Giao thành công: finalize và tự động cộng điểm tích lũy"
+                              >
+                                Giao thành công
+                              </button>
+                              <button
+                                onClick={() => updateOrderStatus(orderId, "RETURNED")}
+                                className="px-2.5 py-1 border border-red-300 text-red-600 rounded hover:bg-red-50 text-[11px] cursor-pointer"
+                              >
+                                Khách hoàn trả
+                              </button>
+                            </>
+                          )}
+
+                          {(s === "DELIVERED" || s === "CANCELLED" || s === "RETURNED") && (
+                            <span className="text-[11px] text-muted italic">Đã kết thúc vòng đời</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>

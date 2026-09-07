@@ -3,7 +3,7 @@
 import React, { useState, Suspense, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signIn } from "next-auth/react";
+import { signIn, useSession, signOut } from "next-auth/react";
 import {
   ArrowRight,
   ShieldCheck,
@@ -14,6 +14,8 @@ import {
   Lock,
   Mail,
   UserCheck,
+  LogOut,
+  User,
 } from "lucide-react";
 import { useRecentLogins } from "@/hooks/useRecentLogins";
 import RecentLoginAccounts from "@/components/auth/RecentLoginAccounts";
@@ -25,6 +27,7 @@ function LoginForm() {
   const registered = searchParams.get("registered");
   const resetSuccess = searchParams.get("resetSuccess");
 
+  const { data: session, status } = useSession();
   const { recentLogins, saveLogin, removeLogin } = useRecentLogins();
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,6 +45,59 @@ function LoginForm() {
       ? "Mật khẩu đã được cập nhật thành công! Vui lòng đăng nhập."
       : ""
   );
+
+  // Nếu người dùng ĐÃ có phiên đăng nhập hợp lệ (ví dụ tài khoản "nam" từ tab khác)
+  if (status === "authenticated" && session?.user) {
+    const activeName = session.user.name || session.user.email?.split("@")[0] || "Khách hàng";
+    const activeEmail = session.user.email || "";
+
+    return (
+      <div className="max-w-md mx-auto px-4 py-12 sm:py-20 space-y-6">
+        <div className="text-center space-y-2">
+          <div className="w-14 h-14 bg-foreground text-background rounded-full flex items-center justify-center mx-auto shadow-md font-bold text-xl uppercase">
+            {activeName.charAt(0)}
+          </div>
+          <h1 className="text-2xl font-bold uppercase tracking-tight">Tài khoản đang đăng nhập</h1>
+          <p className="text-xs text-muted">
+            Trình duyệt của bạn đang duy trì phiên hoạt động cho tài khoản này.
+          </p>
+        </div>
+
+        <div className="p-6 border border-border rounded-xl bg-background shadow-sm space-y-4 text-center">
+          <div className="space-y-1">
+            <p className="text-sm font-bold text-foreground">{activeName}</p>
+            <p className="text-xs text-muted font-mono">{activeEmail}</p>
+          </div>
+
+          <div className="pt-2 space-y-2.5">
+            <Link
+              href={callbackUrl}
+              className="w-full py-3 bg-foreground text-background text-xs font-semibold uppercase tracking-wider rounded-md hover:opacity-90 transition flex items-center justify-center gap-2 shadow-sm"
+            >
+              Vào trang tài khoản & đơn hàng <ArrowRight size={14} />
+            </Link>
+
+            <button
+              type="button"
+              onClick={async () => {
+                setLoading(true);
+                await signOut({ callbackUrl: "/auth/login" });
+              }}
+              className="w-full py-2.5 border border-red-200 dark:border-red-900/60 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 text-xs font-semibold uppercase tracking-wider rounded-md transition flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <LogOut size={14} /> Đăng xuất để đổi tài khoản khác
+            </button>
+          </div>
+        </div>
+
+        <div className="text-center text-xs text-muted">
+          <Link href="/" className="hover:text-foreground underline transition">
+            Quay lại trang chủ mua sắm
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   const handleSelectRecentAccount = (selectedEmail: string) => {
     setEmail(selectedEmail);

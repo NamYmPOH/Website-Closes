@@ -1,14 +1,15 @@
 import type { NextAuthConfig } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
+import Apple from "next-auth/providers/apple";
 import Facebook from "next-auth/providers/facebook";
 import bcrypt from "bcryptjs";
 import prisma from "@/lib/prisma";
 
-// Chỉ load social providers khi có credentials thật
-// Apple bị bỏ qua vì clientSecret phải là PEM/JWT key (không phải plain string)
+// Cấu hình danh sách các Social Login Providers chính thức
 const socialProviders: any[] = [];
 
+// 1. Google OAuth Provider (Google Identity Services)
 if (
   process.env.GOOGLE_CLIENT_ID &&
   process.env.GOOGLE_CLIENT_SECRET &&
@@ -18,10 +19,27 @@ if (
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      allowDangerousEmailAccountLinking: true,
     })
   );
 }
 
+// 2. Apple ID Provider (Sign in with Apple)
+if (
+  process.env.APPLE_CLIENT_ID &&
+  process.env.APPLE_CLIENT_SECRET &&
+  !process.env.APPLE_CLIENT_ID.startsWith("your-")
+) {
+  socialProviders.push(
+    Apple({
+      clientId: process.env.APPLE_CLIENT_ID,
+      clientSecret: process.env.APPLE_CLIENT_SECRET,
+      allowDangerousEmailAccountLinking: true,
+    })
+  );
+}
+
+// 3. Facebook Login Provider (Tùy chọn)
 if (
   process.env.FACEBOOK_CLIENT_ID &&
   process.env.FACEBOOK_CLIENT_SECRET &&
@@ -31,6 +49,7 @@ if (
     Facebook({
       clientId: process.env.FACEBOOK_CLIENT_ID,
       clientSecret: process.env.FACEBOOK_CLIENT_SECRET,
+      allowDangerousEmailAccountLinking: true,
     })
   );
 }
@@ -121,6 +140,26 @@ export const authConfig: NextAuthConfig = {
     signIn: "/auth/login",
     error: "/auth/error",
     verifyRequest: "/auth/verify-request",
+  },
+  events: {
+    async createUser({ user }) {
+      if (user?.id) {
+        try {
+          await prisma.userPoints.upsert({
+            where: { userId: user.id },
+            create: {
+              userId: user.id,
+              availablePoints: 0,
+              totalPoints: 0,
+              usedPoints: 0,
+            },
+            update: {},
+          });
+        } catch (e) {
+          console.error("[OAUTH_CREATE_USER_POINTS_ERROR]", e);
+        }
+      }
+    },
   },
   session: {
     strategy: "jwt",

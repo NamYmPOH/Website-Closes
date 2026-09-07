@@ -295,16 +295,15 @@ export default function CheckoutPage() {
         body: JSON.stringify(checkoutPayload),
       });
 
-      let orderNumber = `ORD-${Date.now().toString().slice(-6)}-${Math.random()
-        .toString(36)
-        .substring(2, 6)
-        .toUpperCase()}`;
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || "Không thể khởi tạo đơn hàng trên hệ thống. Vui lòng kiểm tra lại thông tin!");
+      }
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.order?.orderNumber) {
-          orderNumber = data.order.orderNumber;
-        }
+      const data = await res.json();
+      const orderNumber = data.orderNumber || data.order?.orderNumber;
+      if (!orderNumber) {
+        throw new Error("Không nhận được mã đơn hàng từ hệ thống");
       }
 
       // Lưu snapshot chi tiết đơn hàng vào sessionStorage cho trang xác nhận
@@ -349,9 +348,13 @@ export default function CheckoutPage() {
 
       // Điều hướng đến trang xác nhận đơn hàng thành công
       router.push(`/order-success?orderNumber=${orderNumber}`);
-    } catch (err) {
+    } catch (err: unknown) {
+      const errorMsg =
+        err instanceof Error
+          ? err.message
+          : "Đã xảy ra lỗi trong quá trình xử lý đơn hàng. Vui lòng thử lại!";
       console.error("Place order failed:", err);
-      alert("Đã xảy ra lỗi trong quá trình xử lý đơn hàng. Vui lòng thử lại!");
+      alert(errorMsg);
       setIsSubmitting(false);
     }
   };

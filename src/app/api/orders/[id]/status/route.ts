@@ -36,8 +36,10 @@ export async function POST(
 
     // Run database transaction to ensure atomicity
     const result = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({
-        where: { id: orderId },
+      const order = await tx.order.findFirst({
+        where: {
+          OR: [{ id: orderId }, { orderNumber: orderId }],
+        },
         include: {
           items: {
             include: {
@@ -49,7 +51,7 @@ export async function POST(
       });
 
       if (!order) {
-        throw new Error(`Không tìm thấy đơn hàng với ID: ${orderId}`);
+        throw new Error(`Không tìm thấy đơn hàng: ${orderId}`);
       }
 
       const currentStatus = order.status;
@@ -177,7 +179,7 @@ export async function POST(
         const pointsEarned = Math.floor(Number(order.totalAmount) / 1000);
 
         if (order.userId && pointsEarned > 0) {
-          // Cập nhật UserPoints
+          // Cập nhật UserPoints & loyaltyPointsBalance
           await tx.userPoints.upsert({
             where: { userId: order.userId },
             create: {
@@ -189,6 +191,13 @@ export async function POST(
             update: {
               totalPoints: { increment: pointsEarned },
               availablePoints: { increment: pointsEarned },
+            },
+          });
+
+          await tx.user.update({
+            where: { id: order.userId },
+            data: {
+              loyaltyPointsBalance: { increment: pointsEarned },
             },
           });
 

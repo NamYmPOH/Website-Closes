@@ -62,6 +62,69 @@ interface PointsData {
   }>;
 }
 
+export interface UserOrderItem {
+  id: string;
+  productTitle: string;
+  variantTitle: string | null;
+  variantSku: string;
+  unitPrice: number;
+  quantity: number;
+  totalPrice: number;
+  productImage?: string;
+  productSlug?: string;
+}
+
+export interface UserOrder {
+  id: string;
+  orderNumber: string;
+  status: string;
+  paymentStatus: string;
+  paymentMethod: string;
+  totalAmount: number;
+  subtotal: number;
+  shippingFee: number;
+  discountAmount: number;
+  createdAt: string;
+  items: UserOrderItem[];
+}
+
+function getOrderStatusBadge(status: string) {
+  switch (status) {
+    case "DELIVERED":
+      return {
+        label: "Giao hàng thành công",
+        color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+      };
+    case "SHIPPED":
+      return {
+        label: "Đang vận chuyển",
+        color: "bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300",
+      };
+    case "PROCESSING":
+    case "CONFIRMED":
+      return {
+        label: "Đang chuẩn bị hàng",
+        color: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
+      };
+    case "CANCELLED":
+      return {
+        label: "Đã hủy",
+        color: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
+      };
+    case "REFUNDED":
+      return {
+        label: "Đã hoàn tiền",
+        color: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300",
+      };
+    case "PENDING":
+    default:
+      return {
+        label: "Chờ xác nhận",
+        color: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+      };
+  }
+}
+
 export default function AccountPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
@@ -69,8 +132,8 @@ export default function AccountPage() {
   const [activeTab, setActiveTab] = useState<"orders" | "points" | "addresses" | "profile">("orders");
 
   // State profile
-  const [name, setName] = useState(session?.user?.name || "Nguyễn Văn An");
-  const [phone, setPhone] = useState("0912345678");
+  const [name, setName] = useState(session?.user?.name || "Tài khoản");
+  const [phone, setPhone] = useState("");
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
   const [profileSuccess, setProfileSuccess] = useState(false);
 
@@ -88,27 +151,12 @@ export default function AccountPage() {
   });
   const [addrLoading, setAddrLoading] = useState(false);
 
-  // State Points & Vouchers (Task 2)
+  // State Points & Vouchers (Lấy chính xác từ Database theo User)
   const [pointsData, setPointsData] = useState<PointsData>({
-    availablePoints: 350, // Mặc định điểm ban đầu
-    totalPoints: 500,
-    usedPoints: 150,
-    history: [
-      {
-        id: "pts-1",
-        action: "earn",
-        points: 500,
-        description: "Tích lũy từ đơn hàng thành công #ORD-73105-B2 (500.000₫)",
-        date: "15/08/2026",
-      },
-      {
-        id: "pts-2",
-        action: "redeem",
-        points: -150,
-        description: "Đổi điểm lấy voucher khuyến mãi",
-        date: "20/08/2026",
-      },
-    ],
+    availablePoints: 0,
+    totalPoints: 0,
+    usedPoints: 0,
+    history: [],
     vouchers: [],
   });
   const [redeemingOption, setRedeemingOption] = useState<number | null>(null);
@@ -118,28 +166,42 @@ export default function AccountPage() {
   } | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
-  // Dữ liệu mẫu đơn hàng
-  const mockOrders = [
-    {
-      id: "ORD-98214-X9",
-      date: "02/09/2026",
-      status: "Đang giao hàng",
-      total: 1210000,
-      items: ["Áo Thun Heavyweight (x2)", "Túi Tote Canvas (x1)"],
-    },
-    {
-      id: "ORD-73105-B2",
-      date: "15/08/2026",
-      status: "Hoàn thành",
-      total: 790000,
-      items: ["Quần Linen Relaxed Trousers (x1)"],
-    },
-  ];
+  // State Lịch sử đơn hàng cá nhân thực tế từ Database
+  const [orders, setOrders] = useState<UserOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
 
-  // Fetch points & addresses từ API
+  // Fetch dữ liệu thực tế của user từ API
   useEffect(() => {
     if (session?.user) {
-      // 1. Lấy điểm thưởng
+      const userDisplayName =
+        session.user.name || session.user.email?.split("@")[0] || "Tài khoản";
+      setName(userDisplayName);
+      setNewAddrName(userDisplayName);
+
+      // 1. Lấy đơn hàng thực tế của user
+      setOrdersLoading(true);
+      fetch("/api/user/orders")
+        .then((res) => {
+          if (!res.ok) throw new Error("Không thể tải đơn hàng");
+          return res.json();
+        })
+        .then((data) => {
+          if (data && Array.isArray(data.orders)) {
+            setOrders(data.orders);
+          }
+          setOrdersError(null);
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : "UNKNOWN_ERROR";
+          console.error("[FETCH_USER_ORDERS_ERROR]", msg);
+          setOrdersError("Không thể tải lịch sử đơn hàng. Vui lòng thử lại sau.");
+        })
+        .finally(() => {
+          setOrdersLoading(false);
+        });
+
+      // 2. Lấy điểm thưởng thực tế
       fetch("/api/points")
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
@@ -149,7 +211,7 @@ export default function AccountPage() {
         })
         .catch(() => {});
 
-      // 2. Lấy danh sách địa chỉ
+      // 3. Lấy danh sách địa chỉ đã lưu
       fetch("/api/user/addresses")
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
@@ -158,8 +220,10 @@ export default function AccountPage() {
           }
         })
         .catch(() => {});
+    } else if (status === "unauthenticated") {
+      setOrdersLoading(false);
     }
-  }, [session]);
+  }, [session, status]);
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -429,46 +493,174 @@ export default function AccountPage() {
           {/* 1. TAB ĐƠN HÀNG */}
           {activeTab === "orders" && (
             <div className="space-y-4">
-              <h3 className="text-sm font-bold uppercase tracking-wider">Đơn hàng gần đây ({mockOrders.length})</h3>
-              <div className="space-y-3">
-                {mockOrders.map((order) => (
-                  <div
-                    key={order.id}
-                    className="p-5 border border-border rounded-lg space-y-3 text-xs bg-background shadow-xs hover:border-foreground/30 transition"
-                  >
-                    <div className="flex justify-between items-center pb-2 border-b border-border">
-                      <div className="space-x-2">
-                        <span className="font-mono font-bold text-sm">{order.id}</span>
-                        <span className="text-muted text-[11px]">• {order.date}</span>
-                      </div>
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                          order.status === "Hoàn thành"
-                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                            : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
-                        }`}
-                      >
-                        {order.status}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1">
-                      {order.items.map((item, i) => (
-                        <p key={i} className="text-muted">
-                          {item}
-                        </p>
-                      ))}
-                    </div>
-
-                    <div className="flex justify-between items-center pt-2 border-t border-border font-medium">
-                      <span>Tổng giá trị đơn:</span>
-                      <strong className="text-sm font-bold">
-                        {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(order.total)}
-                      </strong>
-                    </div>
-                  </div>
-                ))}
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold uppercase tracking-wider">
+                  Lịch sử đơn hàng cá nhân ({orders.length})
+                </h3>
+                {ordersLoading && (
+                  <span className="text-xs text-muted flex items-center gap-1.5">
+                    <Loader2 size={13} className="animate-spin" /> Đang cập nhật...
+                  </span>
+                )}
               </div>
+
+              {/* Trạng thái 1: Đang tải dữ liệu */}
+              {ordersLoading ? (
+                <div className="space-y-3">
+                  {[1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="p-5 border border-border rounded-lg space-y-3 bg-background animate-pulse"
+                    >
+                      <div className="flex justify-between items-center pb-2 border-b border-border">
+                        <div className="h-4 bg-neutral-200 dark:bg-neutral-800 rounded w-36"></div>
+                        <div className="h-4 bg-neutral-200 dark:bg-neutral-800 rounded w-20"></div>
+                      </div>
+                      <div className="space-y-2 py-1">
+                        <div className="h-3 bg-neutral-200 dark:bg-neutral-800 rounded w-3/4"></div>
+                        <div className="h-3 bg-neutral-200 dark:bg-neutral-800 rounded w-1/2"></div>
+                      </div>
+                      <div className="flex justify-between items-center pt-2 border-t border-border">
+                        <div className="h-3 bg-neutral-200 dark:bg-neutral-800 rounded w-24"></div>
+                        <div className="h-4 bg-neutral-200 dark:bg-neutral-800 rounded w-28"></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : ordersError ? (
+                /* Trạng thái 2: Lỗi tải dữ liệu */
+                <div className="p-6 border border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/20 rounded-xl text-center space-y-3 text-xs text-red-700 dark:text-red-300">
+                  <AlertCircle size={24} className="mx-auto text-red-500" />
+                  <p>{ordersError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrdersLoading(true);
+                      fetch("/api/user/orders")
+                        .then((res) => res.json())
+                        .then((d) => {
+                          if (d?.orders) setOrders(d.orders);
+                          setOrdersError(null);
+                        })
+                        .catch(() => setOrdersError("Không thể tải đơn hàng."))
+                        .finally(() => setOrdersLoading(false));
+                    }}
+                    className="px-4 py-1.5 bg-red-600 text-white rounded text-xs font-semibold hover:bg-red-700 transition cursor-pointer"
+                  >
+                    Thử tải lại
+                  </button>
+                </div>
+              ) : orders.length === 0 ? (
+                /* Trạng thái 3: Trống (Chưa có đơn hàng) */
+                <div className="p-10 border border-dashed border-border rounded-xl text-center space-y-3 bg-background">
+                  <div className="w-12 h-12 rounded-full bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center mx-auto text-muted">
+                    <Package size={24} />
+                  </div>
+                  <h4 className="text-sm font-bold text-foreground">Bạn chưa có đơn hàng nào</h4>
+                  <p className="text-xs text-muted max-w-sm mx-auto">
+                    Mọi đơn hàng bạn đặt với tài khoản này sẽ được lưu trữ và cập nhật tình trạng giao nhận chi tiết tại đây.
+                  </p>
+                  <div className="pt-2">
+                    <Link
+                      href="/products"
+                      className="inline-flex items-center gap-2 px-5 py-2.5 bg-foreground text-background text-xs font-semibold uppercase tracking-wider rounded-md hover:opacity-90 transition"
+                    >
+                      Khám phá bộ sưu tập ngay
+                    </Link>
+                  </div>
+                </div>
+              ) : (
+                /* Trạng thái 4: Danh sách đơn hàng thực tế của user */
+                <div className="space-y-3">
+                  {orders.map((order) => {
+                    const badge = getOrderStatusBadge(order.status);
+                    const formattedDate = new Date(order.createdAt).toLocaleDateString("vi-VN", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    });
+
+                    return (
+                      <div
+                        key={order.id}
+                        className="p-5 border border-border rounded-lg space-y-3 text-xs bg-background shadow-xs hover:border-foreground/30 transition"
+                      >
+                        <div className="flex flex-wrap justify-between items-center gap-2 pb-2.5 border-b border-border">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-sm text-foreground">
+                              #{order.orderNumber}
+                            </span>
+                            <span className="text-muted text-[11px]">• {formattedDate}</span>
+                          </div>
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${badge.color}`}
+                          >
+                            {badge.label}
+                          </span>
+                        </div>
+
+                        {/* Danh sách các sản phẩm trong đơn */}
+                        <div className="space-y-2 py-1">
+                          {order.items.map((item) => (
+                            <div key={item.id} className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                {item.productImage && (
+                                  <img
+                                    src={item.productImage}
+                                    alt={item.productTitle}
+                                    className="w-8 h-10 object-cover rounded bg-neutral-100 shrink-0"
+                                  />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-medium text-foreground truncate">
+                                    {item.productTitle}
+                                  </p>
+                                  <p className="text-[10px] text-muted truncate">
+                                    {item.variantTitle ? `Phân loại: ${item.variantTitle} • ` : ""}
+                                    Số lượng: {item.quantity}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="text-xs font-semibold text-foreground shrink-0">
+                                {new Intl.NumberFormat("vi-VN", {
+                                  style: "currency",
+                                  currency: "VND",
+                                }).format(item.totalPrice)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Tổng thanh toán và phương thức */}
+                        <div className="flex flex-wrap justify-between items-center gap-2 pt-2.5 border-t border-border font-medium">
+                          <div className="text-[11px] text-muted">
+                            PT thanh toán:{" "}
+                            <span className="font-semibold text-foreground uppercase">
+                              {order.paymentMethod}
+                            </span>
+                            {order.paymentStatus === "PAID" && (
+                              <span className="ml-1.5 text-emerald-600 font-semibold">
+                                • Đã thanh toán
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-muted">Tổng cộng:</span>
+                            <strong className="text-sm font-bold text-foreground">
+                              {new Intl.NumberFormat("vi-VN", {
+                                style: "currency",
+                                currency: "VND",
+                              }).format(order.totalAmount)}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 

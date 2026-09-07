@@ -21,10 +21,26 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Lấy thông tin điểm của người dùng
-    const userPoints = await prisma.userPoints.findUnique({
+    // Lấy thông tin điểm của người dùng (tự động khởi tạo nếu chưa có)
+    let userPoints = await prisma.userPoints.findUnique({
       where: { userId },
     });
+
+    if (!userPoints) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { loyaltyPointsBalance: true },
+      });
+      const initialPoints = user?.loyaltyPointsBalance || 0;
+      userPoints = await prisma.userPoints.create({
+        data: {
+          userId,
+          availablePoints: initialPoints,
+          totalPoints: initialPoints,
+          usedPoints: 0,
+        },
+      });
+    }
 
     // Lấy lịch sử điểm
     const history = await prisma.pointsHistory.findMany({
