@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, Suspense } from "react";
+import React, { useState, Suspense, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
@@ -15,6 +15,8 @@ import {
   Mail,
   UserCheck,
 } from "lucide-react";
+import { useRecentLogins } from "@/hooks/useRecentLogins";
+import RecentLoginAccounts from "@/components/auth/RecentLoginAccounts";
 
 function LoginForm() {
   const router = useRouter();
@@ -22,6 +24,9 @@ function LoginForm() {
   const callbackUrl = searchParams.get("callbackUrl") || "/account";
   const registered = searchParams.get("registered");
   const resetSuccess = searchParams.get("resetSuccess");
+
+  const { recentLogins, saveLogin, removeLogin } = useRecentLogins();
+  const passwordInputRef = useRef<HTMLInputElement>(null);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,6 +42,20 @@ function LoginForm() {
       ? "Mật khẩu đã được cập nhật thành công! Vui lòng đăng nhập."
       : ""
   );
+
+  const handleSelectRecentAccount = (selectedEmail: string) => {
+    setEmail(selectedEmail);
+    setErrorMessage("");
+    setTimeout(() => {
+      passwordInputRef.current?.focus();
+    }, 100);
+  };
+
+  const handleUseOtherAccount = () => {
+    setEmail("");
+    setPassword("");
+    setErrorMessage("");
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,6 +86,15 @@ function LoginForm() {
         return;
       }
 
+      // Lưu vào recent logins (tối đa 2, tuyệt đối loại trừ admin)
+      if (!email.toLowerCase().includes("admin")) {
+        saveLogin({
+          email: email.trim(),
+          name: email.split("@")[0],
+          role: "CUSTOMER",
+        });
+      }
+
       setSuccessMessage("Đăng nhập thành công! Đang chuyển hướng...");
 
       // Tự động điều hướng sau khi phiên được thiết lập
@@ -84,12 +112,6 @@ function LoginForm() {
     }
   };
 
-  const handleQuickFill = (testEmail: string, testPass: string) => {
-    setEmail(testEmail);
-    setPassword(testPass);
-    setErrorMessage("");
-  };
-
   const handleSocialLogin = async (provider: "google" | "apple") => {
     setLoading(true);
     setErrorMessage("");
@@ -100,6 +122,10 @@ function LoginForm() {
       setLoading(false);
     }
   };
+
+  // Chỉ hiển thị tài khoản demo khi bật cấu hình môi trường cụ thể trong development
+  const showDemoAccounts =
+    process.env.NODE_ENV === "development" && process.env.SHOW_DEMO_ACCOUNTS === "true";
 
   return (
     <div className="max-w-md mx-auto px-4 py-12 sm:py-20 space-y-8">
@@ -129,53 +155,47 @@ function LoginForm() {
         </div>
       )}
 
-      {/* Quick Test Accounts Box */}
-      <div className="p-4 border border-border/80 rounded-xl bg-neutral-100/70 dark:bg-neutral-900/50 space-y-2.5">
-        <div className="flex items-center gap-1.5 text-xs font-bold text-foreground uppercase tracking-wide">
-          <UserCheck size={14} className="text-blue-600" />
-          Tài khoản mẫu thử nghiệm nhanh (1-Click)
+      {/* Danh sách tối đa 2 tài khoản gần đây (Lấy từ localStorage, loại trừ Admin) */}
+      <RecentLoginAccounts
+        accounts={recentLogins}
+        selectedEmail={email}
+        onSelectAccount={handleSelectRecentAccount}
+        onRemoveAccount={removeLogin}
+        onUseOtherAccount={handleUseOtherAccount}
+      />
+
+      {/* Tài khoản mẫu (Chỉ hiển thị khi biến môi trường SHOW_DEMO_ACCOUNTS=true trong dev) */}
+      {showDemoAccounts && (
+        <div className="p-4 border border-dashed border-amber-400/80 rounded-xl bg-amber-50/50 dark:bg-amber-950/30 space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800 dark:text-amber-300">
+            <UserCheck size={14} /> Chế độ DEV: Tài khoản kiểm thử nhanh
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setEmail("nguyenvanan@example.com");
+                setPassword("UserPassword@123");
+              }}
+              className="p-2 border rounded bg-background text-left"
+            >
+              <span className="font-bold block text-[11px]">User VIP (An)</span>
+              <span className="text-[10px] text-muted truncate">nguyenvanan@...</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEmail("tranmai@example.com");
+                setPassword("UserPassword@123");
+              }}
+              className="p-2 border rounded bg-background text-left"
+            >
+              <span className="font-bold block text-[11px]">User Mua sắm (Mai)</span>
+              <span className="text-[10px] text-muted truncate">tranmai@...</span>
+            </button>
+          </div>
         </div>
-        <p className="text-[11px] text-muted">
-          Bấm vào nút dưới đây để điền nhanh thông tin tài khoản đã được seed trong hệ thống:
-        </p>
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <button
-            type="button"
-            onClick={() => handleQuickFill("admin@aurastudio.com", "AdminPassword@123")}
-            className="px-2.5 py-2 bg-background border border-border rounded-md hover:border-foreground transition text-left font-medium flex flex-col"
-          >
-            <span className="font-bold text-foreground text-[11px]">👑 Super Admin</span>
-            <span className="text-[10px] text-muted truncate">admin@aurastudio.com</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleQuickFill("nguyenvanan@example.com", "UserPassword@123")}
-            className="px-2.5 py-2 bg-background border border-border rounded-md hover:border-foreground transition text-left font-medium flex flex-col"
-          >
-            <span className="font-bold text-foreground text-[11px]">⭐ User VIP (An)</span>
-            <span className="text-[10px] text-muted truncate">nguyenvanan@...</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleQuickFill("tranmai@example.com", "UserPassword@123")}
-            className="px-2.5 py-2 bg-background border border-border rounded-md hover:border-foreground transition text-left font-medium flex flex-col"
-          >
-            <span className="font-bold text-foreground text-[11px]">🛍️ User Mua sắm (Mai)</span>
-            <span className="text-[10px] text-muted truncate">tranmai@...</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleQuickFill("staff@aurastudio.com", "StaffPassword@123")}
-            className="px-2.5 py-2 bg-background border border-border rounded-md hover:border-foreground transition text-left font-medium flex flex-col"
-          >
-            <span className="font-bold text-foreground text-[11px]">👔 Nhân viên Editor</span>
-            <span className="text-[10px] text-muted truncate">staff@...</span>
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Login Form */}
       <form
@@ -210,6 +230,7 @@ function LoginForm() {
           </div>
           <div className="relative">
             <input
+              ref={passwordInputRef}
               type={showPassword ? "text" : "password"}
               required
               placeholder="••••••••"

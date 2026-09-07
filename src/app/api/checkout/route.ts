@@ -85,24 +85,26 @@ export async function POST(request: NextRequest) {
             throw new Error(`Biến thể sản phẩm không tồn tại: ID ${item.variantId}`);
           }
 
-          if (variant.stockQuantity < item.quantity) {
+          const availableStock = variant.stockQuantity - variant.reservedQuantity;
+          if (availableStock < item.quantity) {
             throw new Error(
-              `Sản phẩm "${variant.product.title}" (SKU: ${variant.sku}) chỉ còn ${variant.stockQuantity} món trong kho`
+              `Sản phẩm "${variant.product.title}" (SKU: ${variant.sku}) chỉ còn ${Math.max(0, availableStock)} món khả dụng trong kho`
             );
           }
 
-          // Trừ tồn kho trực tiếp trong transaction
+          // Trừ tồn kho tạm thời (tăng reservedQuantity cho đơn hàng PENDING)
           await tx.productVariant.update({
             where: { id: item.variantId },
             data: {
-              stockQuantity: { decrement: item.quantity },
+              reservedQuantity: { increment: item.quantity },
             },
           });
 
-          // Tăng salesCount cho sản phẩm
+          // Tăng reservedQuantity và salesCount cho sản phẩm
           await tx.product.update({
             where: { id: variant.productId },
             data: {
+              reservedQuantity: { increment: item.quantity },
               salesCount: { increment: item.quantity },
             },
           });
@@ -226,6 +228,20 @@ export async function POST(request: NextRequest) {
             },
           },
         });
+
+        // Ghi log Inventory tracking cho từng món giữ chỗ (RESERVED)
+        for (const item of items) {
+          await tx.inventoryLog.create({
+            data: {
+              productId: item.productId,
+              variantId: item.variantId,
+              orderId: order.id,
+              changeType: "RESERVED",
+              quantityChange: item.quantity,
+              reason: `Giữ chỗ kho tạm thời cho đơn hàng mới #${order.orderNumber} (chờ xác nhận/thanh toán)`,
+            },
+          });
+        }
 
         // Ghi nhận lịch sử dùng coupon
         if (appliedCouponId && userId) {

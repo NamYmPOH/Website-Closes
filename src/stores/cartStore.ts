@@ -18,6 +18,7 @@ interface CartStoreState {
   wishlistProducts: ProductItem[]; // Danh sách sản phẩm yêu thích đầy đủ
   couponCode: string | null;
   discountPercentage: number;
+  fixedDiscount: number;
   
   // Actions
   addItem: (product: ProductItem, quantity?: number, color?: string, size?: string) => void;
@@ -27,6 +28,7 @@ interface CartStoreState {
   openMiniCart: () => void;
   closeMiniCart: () => void;
   applyCoupon: (code: string) => { success: boolean; message: string };
+  setAppliedVoucher: (voucher: { code: string; discountType: string; discountValue: number; discountAmount?: number }) => void;
   removeCoupon: () => void;
   toggleWishlist: (product: ProductItem | string) => void;
   isInWishlist: (productId: string) => boolean;
@@ -48,6 +50,7 @@ export const useCartStore = create<CartStoreState>()(
       wishlistProducts: [],
       couponCode: null,
       discountPercentage: 0,
+      fixedDiscount: 0,
 
       addItem: (product, quantity = 1, color, size) => {
         set((state) => {
@@ -82,7 +85,7 @@ export const useCartStore = create<CartStoreState>()(
       },
 
       clearCart: () => {
-        set({ items: [], couponCode: null, discountPercentage: 0 });
+        set({ items: [], couponCode: null, discountPercentage: 0, fixedDiscount: 0 });
       },
 
       openMiniCart: () => set({ isMiniCartOpen: true }),
@@ -91,17 +94,33 @@ export const useCartStore = create<CartStoreState>()(
       applyCoupon: (code: string) => {
         const cleanCode = code.trim().toUpperCase();
         if (cleanCode === "AURA10") {
-          set({ couponCode: "AURA10", discountPercentage: 10 });
+          set({ couponCode: "AURA10", discountPercentage: 10, fixedDiscount: 0 });
           return { success: true, message: "Áp dụng mã AURA10 thành công: Giảm 10%!" };
         }
         if (cleanCode === "FREESHIP") {
-          set({ couponCode: "FREESHIP", discountPercentage: 0 });
+          set({ couponCode: "FREESHIP", discountPercentage: 0, fixedDiscount: 0 });
           return { success: true, message: "Áp dụng mã FREESHIP thành công: Miễn phí vận chuyển!" };
         }
         return { success: false, message: "Mã giảm giá không hợp lệ hoặc đã hết hạn" };
       },
 
-      removeCoupon: () => set({ couponCode: null, discountPercentage: 0 }),
+      setAppliedVoucher: (voucher) => {
+        if (voucher.discountType === "percent") {
+          set({
+            couponCode: voucher.code,
+            discountPercentage: voucher.discountValue,
+            fixedDiscount: 0,
+          });
+        } else {
+          set({
+            couponCode: voucher.code,
+            discountPercentage: 0,
+            fixedDiscount: voucher.discountAmount || voucher.discountValue,
+          });
+        }
+      },
+
+      removeCoupon: () => set({ couponCode: null, discountPercentage: 0, fixedDiscount: 0 }),
 
       toggleWishlist: (product: ProductItem | string) => {
         const productId = typeof product === "string" ? product : product.id;
@@ -136,7 +155,9 @@ export const useCartStore = create<CartStoreState>()(
       getDiscountAmount: () => {
         const subtotal = get().getSubtotal();
         const discountPct = get().discountPercentage;
-        return (subtotal * discountPct) / 100;
+        const fixed = get().fixedDiscount || 0;
+        const pctAmount = (subtotal * discountPct) / 100;
+        return Math.min(subtotal, Math.round(pctAmount + fixed));
       },
 
       getShippingFee: () => {
@@ -164,6 +185,7 @@ export const useCartStore = create<CartStoreState>()(
         wishlistProducts: state.wishlistProducts,
         couponCode: state.couponCode,
         discountPercentage: state.discountPercentage,
+        fixedDiscount: state.fixedDiscount,
       }),
     }
   )

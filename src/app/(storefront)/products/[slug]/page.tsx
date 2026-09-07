@@ -120,8 +120,12 @@ export default function ProductDetailPage({
 
   const currentPrice = currentVariant ? currentVariant.price : product.basePrice;
   const currentComparePrice = currentVariant ? currentVariant.compareAtPrice : product.compareAtPrice;
-  const currentStock = currentVariant ? (currentVariant.stock ?? 10) : 10;
+  const actualStock = currentVariant ? (currentVariant.stock ?? currentVariant.stockQuantity ?? product.stockQuantity ?? 10) : (product.stockQuantity ?? 10);
+  const reservedStock = currentVariant ? (currentVariant.reservedQuantity ?? 0) : (product.reservedQuantity ?? 0);
+  const currentStock = Math.max(0, actualStock - reservedStock);
+  const reorderThreshold = currentVariant?.reorderThreshold ?? product.reorderThreshold ?? 5;
   const isOutOfStock = currentStock <= 0 || product.badges?.isOutOfStock;
+  const isLowStock = !isOutOfStock && currentStock <= reorderThreshold;
 
   const availableColors: string[] = Array.from(
     new Set((product.variants || []).map((v: any) => v.color).filter(Boolean))
@@ -393,11 +397,21 @@ export default function ProductDetailPage({
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold uppercase tracking-wider">Số lượng:</span>
               <span
-                className={`font-medium ${
-                  isOutOfStock ? "text-red-500 font-bold" : "text-muted"
+                className={`text-[11px] font-semibold flex items-center gap-1 ${
+                  isOutOfStock
+                    ? "text-red-500 font-bold"
+                    : isLowStock
+                    ? "text-amber-600 dark:text-amber-400 font-bold"
+                    : "text-emerald-600 dark:text-emerald-400"
                 }`}
               >
-                {isOutOfStock ? "Tạm hết hàng" : `Còn lại: ${currentStock} sản phẩm`}
+                {isOutOfStock ? (
+                  "● Tạm hết hàng"
+                ) : isLowStock ? (
+                  `● Sắp hết hàng — Chỉ còn ${currentStock} chiếc`
+                ) : (
+                  `● Còn hàng (${currentStock} sản phẩm có sẵn)`
+                )}
               </span>
             </div>
 

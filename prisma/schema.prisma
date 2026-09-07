@@ -59,6 +59,9 @@ model User {
   cart                  Cart?
   couponUsages          CouponUsage[]
   pushSubscriptions     PushSubscription[]
+  userPoints            UserPoints?
+  pointsHistories       PointsHistory[]
+  vouchers              Voucher[]
 
   @@index([email])
   @@index([role])
@@ -218,6 +221,9 @@ model Product {
   isTrending       Boolean         @default(false)
   isNewArrival     Boolean         @default(true)
   salesCount       Int             @default(0)
+  stockQuantity    Int             @default(0)
+  reservedQuantity Int             @default(0)
+  reorderThreshold Int             @default(5)
   averageRating    Float           @default(0.0)
   reviewCount      Int             @default(0)
   videoUrl         String?
@@ -243,6 +249,7 @@ model Product {
   cartItems        CartItem[]
   orderItems       OrderItem[]
   flashSaleItems   FlashSaleItem[]
+  inventoryLogs    InventoryLog[]
   
   relatedFrom      ProductRelation[] @relation("SourceProduct")
   relatedTo        ProductRelation[] @relation("TargetProduct")
@@ -299,7 +306,9 @@ model ProductVariant {
   price             Decimal  @db.Decimal(12, 2)
   compareAtPrice    Decimal? @db.Decimal(12, 2)
   stockQuantity     Int      @default(0)
+  reservedQuantity  Int      @default(0)
   lowStockThreshold Int      @default(5)
+  reorderThreshold  Int      @default(5)
   weightGrams       Int?
   attributes        Json     // e.g., {"color": "Midnight Black", "size": "XL"}
   image             String?
@@ -309,6 +318,7 @@ model ProductVariant {
   product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   cartItems         CartItem[]
   orderItems        OrderItem[]
+  inventoryLogs     InventoryLog[]
 
   @@index([productId])
   @@index([sku])
@@ -416,11 +426,13 @@ model CartItem {
 
 enum OrderStatus {
   PENDING
+  CONFIRMED
   PROCESSING
   SHIPPED
   DELIVERED
   CANCELLED
   REFUNDED
+  RETURNED
 }
 
 enum PaymentMethod {
@@ -474,6 +486,8 @@ model Order {
   payments           PaymentRecord[]
   refunds            Refund[]
   notes              OrderNote[]
+  inventoryLogs      InventoryLog[]
+  pointsHistories    PointsHistory[]
 
   @@index([orderNumber])
   @@index([userId])
@@ -728,3 +742,82 @@ model PushSubscription {
 
   user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+// =======================================================
+// 9. INVENTORY MANAGEMENT & AUDIT LOGS
+// =======================================================
+
+model InventoryLog {
+  id             String          @id @default(cuid())
+  productId      String
+  variantId      String?
+  changeType     String          // RESERVED, CONFIRMED, CANCELLED, RETURNED, RESTOCK, ADJUSTMENT
+  quantityChange Int
+  reason         String?
+  orderId        String?
+  createdAt      DateTime        @default(now())
+
+  product        Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant        ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+  order          Order?          @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+// =======================================================
+// 10. REWARD POINTS & VOUCHER SYSTEM
+// =======================================================
+
+model UserPoints {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  totalPoints     Int      @default(0)
+  usedPoints      Int      @default(0)
+  availablePoints Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PointsHistory {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String   // "earn" | "redeem"
+  points      Int
+  orderId     String?
+  description String?
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order       Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([orderId])
+  @@index([createdAt])
+}
+
+model Voucher {
+  id                String   @id @default(cuid())
+  code              String   @unique
+  discountType      String   // "fixed" | "percent"
+  discountValue     Decimal  @db.Decimal(12, 2)
+  minOrder          Decimal  @default(0.00) @db.Decimal(12, 2)
+  expiryDate        DateTime
+  isUsed            Boolean  @default(false)
+  userId            String?
+  createdFromPoints Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([code])
+  @@index([userId])
+  @@index([isUsed])
+}
+
