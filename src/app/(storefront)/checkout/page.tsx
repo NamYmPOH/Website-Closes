@@ -1,29 +1,43 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { useCartStore } from "@/stores/cartStore";
-import { ShieldCheck, Truck, CreditCard, Banknote, ArrowRight, CheckCircle2 } from "lucide-react";
+import { ShieldCheck, Truck, CreditCard, Banknote, ArrowRight, AlertCircle } from "lucide-react";
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { items, getSubtotal, getDiscountAmount, getShippingFee, getTotal, clearCart } =
+  const { data: session } = useSession();
+  const { items, getSubtotal, getDiscountAmount, getShippingFee, getTotal, clearCart, couponCode } =
     useCartStore();
 
   const [formData, setFormData] = useState({
-    fullName: "Nguyễn Văn An",
-    phone: "0912345678",
-    email: "nguyenvanan@example.com",
-    street: "123 Đường Nguyễn Huệ, Phường Bến Nghé",
-    city: "Hồ Chí Minh",
-    district: "Quận 1",
+    fullName: "",
+    phone: "",
+    email: "",
+    street: "",
+    city: "",
+    district: "",
     notes: "",
   });
 
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [paymentMethod, setPaymentMethod] = useState<"COD" | "VNPAY" | "MOMO" | "STRIPE">("COD");
   const [shippingMethod, setShippingMethod] = useState<"standard" | "express">("standard");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Tự động điền thông tin nếu khách hàng đã đăng nhập
+  useEffect(() => {
+    if (session?.user) {
+      setFormData((prev) => ({
+        ...prev,
+        fullName: prev.fullName || session.user?.name || "",
+        email: prev.email || session.user?.email || "",
+      }));
+    }
+  }, [session]);
 
   const subtotal = getSubtotal();
   const discount = getDiscountAmount();
@@ -31,10 +45,56 @@ export default function CheckoutPage() {
   const shippingFee = shippingMethod === "express" ? baseShipping + 25000 : baseShipping;
   const total = Math.max(0, subtotal - discount + shippingFee);
 
+  const validateForm = () => {
+    const errs: Record<string, string> = {};
+
+    if (!formData.fullName.trim()) {
+      errs.fullName = "Vui lòng nhập họ và tên người nhận.";
+    } else if (formData.fullName.trim().length < 2) {
+      errs.fullName = "Họ và tên người nhận quá ngắn.";
+    }
+
+    const phoneClean = formData.phone.trim().replace(/\s/g, "");
+    if (!phoneClean) {
+      errs.phone = "Vui lòng nhập số điện thoại liên hệ.";
+    } else if (!/^(0[3|5|7|8|9])[0-9]{8}$|^0[0-9]{9}$/.test(phoneClean)) {
+      errs.phone = "Số điện thoại Việt Nam không hợp lệ (10 số, bắt đầu bằng số 0).";
+    }
+
+    const emailClean = formData.email.trim();
+    if (!emailClean) {
+      errs.email = "Vui lòng nhập địa chỉ email nhận hóa đơn.";
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailClean)) {
+      errs.email = "Định dạng email không hợp lệ (VD: tenban@example.com).";
+    }
+
+    if (!formData.street.trim()) {
+      errs.street = "Vui lòng nhập địa chỉ cụ thể (số nhà, tên đường, phường/xã).";
+    }
+
+    if (!formData.city.trim()) {
+      errs.city = "Vui lòng nhập Tỉnh / Thành phố.";
+    }
+
+    if (!formData.district.trim()) {
+      errs.district = "Vui lòng nhập Quận / Huyện.";
+    }
+
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
   const handlePlaceOrder = (e: React.FormEvent) => {
     e.preventDefault();
+
     if (items.length === 0) {
-      alert("Giỏ hàng rỗng!");
+      alert("Giỏ hàng của bạn đang rỗng!");
+      return;
+    }
+
+    if (!validateForm()) {
+      // Cuộn lên phần thông tin nhận hàng nếu có lỗi
+      window.scrollTo({ top: 100, behavior: "smooth" });
       return;
     }
 
@@ -46,13 +106,34 @@ export default function CheckoutPage() {
         .substring(2, 6)
         .toUpperCase()}`;
 
-      // Xóa sạch giỏ hàng sau khi đặt thành công
+      // Lưu chi tiết đơn hàng vào sessionStorage để trang thành công hiển thị trọn vẹn
+      const orderSnapshot = {
+        orderNumber,
+        createdAt: new Date().toISOString(),
+        items: [...items],
+        subtotal,
+        discount,
+        shippingFee,
+        total,
+        couponCode,
+        customer: { ...formData },
+        paymentMethod,
+        shippingMethod,
+      };
+
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("aura_last_order", JSON.stringify(orderSnapshot));
+      }
+
+      // Làm trống giỏ hàng
       clearCart();
-      router.push(`/checkout/success?orderNumber=${orderNumber}&total=${total}&name=${encodeURIComponent(formData.fullName)}`);
-    }, 1200);
+
+      // Điều hướng đến trang xác nhận đơn hàng
+      router.push(`/order-success?orderNumber=${orderNumber}`);
+    }, 1000);
   };
 
-  if (items.length === 0) {
+  if (items.length === 0 && !isSubmitting) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-20 text-center space-y-4">
         <h2 className="text-2xl font-bold uppercase tracking-tight">Giỏ hàng rỗng</h2>
@@ -73,13 +154,15 @@ export default function CheckoutPage() {
         Thanh toán đơn hàng
       </h1>
 
-      <form onSubmit={handlePlaceOrder} className="grid grid-cols-1 lg:grid-cols-12 gap-12">
-        {/* Left Column: Customer Details & Payment (8 cols) */}
+      <form onSubmit={handlePlaceOrder} noValidate className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+        {/* Left Column: Customer Details & Payment (7 cols) */}
         <div className="lg:col-span-7 space-y-8">
-          {/* 1. Thông tin giao hàng (Tính năng 53, 54) */}
+          {/* 1. Thông tin giao hàng */}
           <div className="space-y-4 p-6 border border-border rounded-lg bg-background">
             <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-foreground text-background text-[11px] flex items-center justify-center font-bold">1</span>
+              <span className="w-5 h-5 rounded-full bg-foreground text-background text-[11px] flex items-center justify-center font-bold">
+                1
+              </span>
               Thông tin nhận hàng
             </h2>
 
@@ -88,64 +171,126 @@ export default function CheckoutPage() {
                 <label className="text-muted font-medium">Họ và tên người nhận *</label>
                 <input
                   type="text"
-                  required
+                  placeholder="VD: Nguyễn Văn An"
                   value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                  className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:border-foreground"
+                  onChange={(e) => {
+                    setFormData({ ...formData, fullName: e.target.value });
+                    if (errors.fullName) setErrors({ ...errors, fullName: "" });
+                  }}
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none transition ${
+                    errors.fullName ? "border-red-500 focus:border-red-500 bg-red-50/10" : "border-border focus:border-foreground"
+                  }`}
                 />
+                {errors.fullName && (
+                  <p className="text-red-500 text-[11px] flex items-center gap-1 mt-1">
+                    <AlertCircle size={12} /> {errors.fullName}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">
                 <label className="text-muted font-medium">Số điện thoại liên hệ *</label>
                 <input
                   type="tel"
-                  required
+                  placeholder="VD: 0912345678"
                   value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:border-foreground"
+                  onChange={(e) => {
+                    setFormData({ ...formData, phone: e.target.value });
+                    if (errors.phone) setErrors({ ...errors, phone: "" });
+                  }}
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none transition ${
+                    errors.phone ? "border-red-500 focus:border-red-500 bg-red-50/10" : "border-border focus:border-foreground"
+                  }`}
                 />
+                {errors.phone && (
+                  <p className="text-red-500 text-[11px] flex items-center gap-1 mt-1">
+                    <AlertCircle size={12} /> {errors.phone}
+                  </p>
+                )}
               </div>
 
               <div className="sm:col-span-2 space-y-1">
                 <label className="text-muted font-medium">Địa chỉ Email (Nhận hóa đơn điện tử) *</label>
                 <input
                   type="email"
-                  required
+                  placeholder="VD: tenban@gmail.com"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:border-foreground"
+                  onChange={(e) => {
+                    setFormData({ ...formData, email: e.target.value });
+                    if (errors.email) setErrors({ ...errors, email: "" });
+                  }}
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none transition ${
+                    errors.email ? "border-red-500 focus:border-red-500 bg-red-50/10" : "border-border focus:border-foreground"
+                  }`}
                 />
+                {errors.email && (
+                  <p className="text-red-500 text-[11px] flex items-center gap-1 mt-1">
+                    <AlertCircle size={12} /> {errors.email}
+                  </p>
+                )}
               </div>
 
               <div className="sm:col-span-2 space-y-1">
-                <label className="text-muted font-medium">Địa chỉ chi tiết (Số nhà, Tên đường) *</label>
+                <label className="text-muted font-medium">Địa chỉ chi tiết (Số nhà, Tên đường, Phường/Xã) *</label>
                 <input
                   type="text"
-                  required
+                  placeholder="VD: Số 123 Đường Nguyễn Huệ, Phường Bến Nghé"
                   value={formData.street}
-                  onChange={(e) => setFormData({ ...formData, street: e.target.value })}
-                  className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:border-foreground"
+                  onChange={(e) => {
+                    setFormData({ ...formData, street: e.target.value });
+                    if (errors.street) setErrors({ ...errors, street: "" });
+                  }}
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none transition ${
+                    errors.street ? "border-red-500 focus:border-red-500 bg-red-50/10" : "border-border focus:border-foreground"
+                  }`}
                 />
+                {errors.street && (
+                  <p className="text-red-500 text-[11px] flex items-center gap-1 mt-1">
+                    <AlertCircle size={12} /> {errors.street}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">
-                <label className="text-muted font-medium">Tỉnh / Thành phố</label>
+                <label className="text-muted font-medium">Tỉnh / Thành phố *</label>
                 <input
                   type="text"
+                  placeholder="VD: TP. Hồ Chí Minh hoặc Hà Nội"
                   value={formData.city}
-                  onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                  className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:border-foreground"
+                  onChange={(e) => {
+                    setFormData({ ...formData, city: e.target.value });
+                    if (errors.city) setErrors({ ...errors, city: "" });
+                  }}
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none transition ${
+                    errors.city ? "border-red-500 focus:border-red-500 bg-red-50/10" : "border-border focus:border-foreground"
+                  }`}
                 />
+                {errors.city && (
+                  <p className="text-red-500 text-[11px] flex items-center gap-1 mt-1">
+                    <AlertCircle size={12} /> {errors.city}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1">
-                <label className="text-muted font-medium">Quận / Huyện</label>
+                <label className="text-muted font-medium">Quận / Huyện *</label>
                 <input
                   type="text"
+                  placeholder="VD: Quận 1 hoặc Cầu Giấy"
                   value={formData.district}
-                  onChange={(e) => setFormData({ ...formData, district: e.target.value })}
-                  className="w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:border-foreground"
+                  onChange={(e) => {
+                    setFormData({ ...formData, district: e.target.value });
+                    if (errors.district) setErrors({ ...errors, district: "" });
+                  }}
+                  className={`w-full px-3 py-2 border rounded-md focus:outline-none transition ${
+                    errors.district ? "border-red-500 focus:border-red-500 bg-red-50/10" : "border-border focus:border-foreground"
+                  }`}
                 />
+                {errors.district && (
+                  <p className="text-red-500 text-[11px] flex items-center gap-1 mt-1">
+                    <AlertCircle size={12} /> {errors.district}
+                  </p>
+                )}
               </div>
 
               <div className="sm:col-span-2 space-y-1">
@@ -161,10 +306,12 @@ export default function CheckoutPage() {
             </div>
           </div>
 
-          {/* 2. Phương thức vận chuyển (Tính năng 55) */}
+          {/* 2. Phương thức vận chuyển */}
           <div className="space-y-4 p-6 border border-border rounded-lg bg-background">
             <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-foreground text-background text-[11px] flex items-center justify-center font-bold">2</span>
+              <span className="w-5 h-5 rounded-full bg-foreground text-background text-[11px] flex items-center justify-center font-bold">
+                2
+              </span>
               Phương thức vận chuyển
             </h2>
 
@@ -172,11 +319,19 @@ export default function CheckoutPage() {
               <label
                 onClick={() => setShippingMethod("standard")}
                 className={`flex items-center justify-between p-3.5 border rounded-lg cursor-pointer transition ${
-                  shippingMethod === "standard" ? "border-foreground bg-neutral-50 dark:bg-neutral-900" : "border-border"
+                  shippingMethod === "standard"
+                    ? "border-foreground bg-neutral-50 dark:bg-neutral-900"
+                    : "border-border"
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <input type="radio" name="shipping" checked={shippingMethod === "standard"} readOnly className="accent-foreground" />
+                  <input
+                    type="radio"
+                    name="shipping"
+                    checked={shippingMethod === "standard"}
+                    onChange={() => setShippingMethod("standard")}
+                    className="accent-foreground"
+                  />
                   <div>
                     <span className="font-semibold block">Giao hàng tiêu chuẩn (2 - 3 ngày)</span>
                     <span className="text-muted text-[11px]">Đơn vị vận chuyển liên kết toàn quốc</span>
@@ -190,11 +345,19 @@ export default function CheckoutPage() {
               <label
                 onClick={() => setShippingMethod("express")}
                 className={`flex items-center justify-between p-3.5 border rounded-lg cursor-pointer transition ${
-                  shippingMethod === "express" ? "border-foreground bg-neutral-50 dark:bg-neutral-900" : "border-border"
+                  shippingMethod === "express"
+                    ? "border-foreground bg-neutral-50 dark:bg-neutral-900"
+                    : "border-border"
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <input type="radio" name="shipping" checked={shippingMethod === "express"} readOnly className="accent-foreground" />
+                  <input
+                    type="radio"
+                    name="shipping"
+                    checked={shippingMethod === "express"}
+                    onChange={() => setShippingMethod("express")}
+                    className="accent-foreground"
+                  />
                   <div>
                     <span className="font-semibold block">Giao hỏa tốc 24H (Nội thành)</span>
                     <span className="text-muted text-[11px]">Giao ngay trong ngày qua Grab / Ahamove</span>
@@ -207,10 +370,12 @@ export default function CheckoutPage() {
             </div>
           </div>
 
-          {/* 3. Phương thức thanh toán (Tính năng 56, 57) */}
+          {/* 3. Phương thức thanh toán */}
           <div className="space-y-4 p-6 border border-border rounded-lg bg-background">
             <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-foreground text-background text-[11px] flex items-center justify-center font-bold">3</span>
+              <span className="w-5 h-5 rounded-full bg-foreground text-background text-[11px] flex items-center justify-center font-bold">
+                3
+              </span>
               Phương thức thanh toán
             </h2>
 
@@ -233,7 +398,13 @@ export default function CheckoutPage() {
                   >
                     <div className="flex items-start justify-between mb-2">
                       <Icon size={18} className={isSelected ? "text-foreground" : "text-muted"} />
-                      <input type="radio" name="payment" checked={isSelected} readOnly className="accent-foreground" />
+                      <input
+                        type="radio"
+                        name="payment"
+                        checked={isSelected}
+                        onChange={() => setPaymentMethod(m.id as any)}
+                        className="accent-foreground"
+                      />
                     </div>
                     <div>
                       <span className="font-semibold block text-xs">{m.title}</span>
@@ -253,12 +424,20 @@ export default function CheckoutPage() {
 
             {/* Mini Items List */}
             <div className="divide-y divide-border max-h-80 overflow-y-auto pr-1 text-xs">
-              {items.map((item) => (
-                <div key={item.product.id} className="py-3 flex items-center gap-3">
-                  <img src={item.product.primaryImage} alt="" className="w-12 h-16 object-cover rounded bg-neutral-100" />
+              {items.map((item, idx) => (
+                <div key={`${item.product.id}-${idx}`} className="py-3 flex items-center gap-3">
+                  <img
+                    src={item.product.primaryImage}
+                    alt={item.product.title}
+                    className="w-12 h-16 object-cover rounded bg-neutral-100 flex-shrink-0"
+                  />
                   <div className="flex-1 min-w-0">
                     <h4 className="font-semibold truncate">{item.product.title}</h4>
-                    <p className="text-muted mt-0.5">SL: {item.quantity}</p>
+                    <div className="flex items-center gap-2 text-muted text-[11px] mt-0.5">
+                      <span>SL: {item.quantity}</span>
+                      {item.selectedColor && <span>• Màu: {item.selectedColor}</span>}
+                      {item.selectedSize && <span>• Size: {item.selectedSize}</span>}
+                    </div>
                   </div>
                   <span className="font-bold">
                     {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(
@@ -279,7 +458,7 @@ export default function CheckoutPage() {
               </div>
               {discount > 0 && (
                 <div className="flex justify-between text-green-600 font-medium">
-                  <span>Giảm giá</span>
+                  <span>Giảm giá voucher {couponCode ? `(${couponCode})` : ""}</span>
                   <span>
                     -{new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(discount)}
                   </span>
@@ -305,10 +484,10 @@ export default function CheckoutPage() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-4 bg-foreground text-background text-xs font-semibold uppercase tracking-wider rounded-md hover:opacity-90 transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50"
+              className="w-full py-4 bg-foreground text-background text-xs font-semibold uppercase tracking-wider rounded-md hover:opacity-90 transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 cursor-pointer"
             >
               {isSubmitting ? (
-                "Đang xử lý đơn hàng..."
+                "Đang tiến hành đặt hàng..."
               ) : (
                 <>
                   Xác nhận đặt hàng <ArrowRight size={14} />
@@ -319,9 +498,11 @@ export default function CheckoutPage() {
 
           <div className="p-4 border border-border rounded-lg text-xs text-muted space-y-2">
             <div className="flex items-center gap-2 font-medium text-foreground">
-              <ShieldCheck size={16} /> Chính sách cam kết
+              <ShieldCheck size={16} /> Cam kết mua sắm AURA
             </div>
-            <p>Kiểm tra hàng trước khi thanh toán (đồng kiểm cùng shipper). Đổi trả miễn phí trong 30 ngày nếu phát sinh lỗi kỹ thuật.</p>
+            <p>
+              Đồng kiểm cùng shipper khi nhận hàng. Đổi trả miễn phí 30 ngày cho mọi lỗi kỹ thuật hoặc đổi size thuận tiện.
+            </p>
           </div>
         </div>
       </form>

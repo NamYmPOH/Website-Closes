@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
+import { useCartStore } from "@/stores/cartStore";
 import {
   Search,
   ShoppingBag,
@@ -16,6 +17,8 @@ import {
   Shield,
   UserCheck,
   ChevronDown,
+  Loader2,
+  ArrowRight,
 } from "lucide-react";
 
 interface HeaderProps {
@@ -26,23 +29,66 @@ interface HeaderProps {
 export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
   const router = useRouter();
   const { data: session, status } = useSession();
+  const { wishlist } = useCartStore();
+  const wishlistCount = wishlist.length;
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isListening, setIsListening] = useState(false);
 
-  const userMenuRef = useRef<HTMLDivElement>(null);
+  // Autocomplete Suggestions State
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [isSuggestLoading, setIsSuggestLoading] = useState(false);
+  const [isSuggestOpen, setIsSuggestOpen] = useState(false);
 
-  // Đóng dropdown user khi click ra ngoài
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Đóng dropdown khi click ra ngoài
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
         setIsUserMenuOpen(false);
       }
+      if (
+        searchContainerRef.current &&
+        !searchContainerRef.current.contains(event.target as Node)
+      ) {
+        setIsSuggestOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Debounce 300ms tìm kiếm gợi ý autocomplete
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed || trimmed.length < 2) {
+      setSuggestions([]);
+      setIsSuggestOpen(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsSuggestLoading(true);
+      try {
+        const res = await fetch(`/api/products/search-suggest?q=${encodeURIComponent(trimmed)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSuggestions(data.items || []);
+          setIsSuggestOpen(true);
+        }
+      } catch (err) {
+        console.error("[AUTOCOMPLETE_ERROR]", err);
+      } finally {
+        setIsSuggestLoading(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   // Voice Search
   const handleVoiceSearch = () => {
@@ -61,6 +107,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
       const transcript = event.results[0][0].transcript;
       setSearchQuery(transcript);
       setIsListening(false);
+      setIsSuggestOpen(false);
       router.push(`/products?q=${encodeURIComponent(transcript)}`);
     };
 
@@ -71,6 +118,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
   const handleSearchSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (searchQuery.trim()) {
+      setIsSuggestOpen(false);
       router.push(`/products?q=${encodeURIComponent(searchQuery.trim())}`);
     }
   };
@@ -119,37 +167,122 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
           </Link>
         </nav>
 
-        {/* Central Search Bar */}
-        <form
-          onSubmit={handleSearchSubmit}
-          className="hidden md:flex flex-1 max-w-md relative items-center"
-        >
-          <div className="w-full relative">
+        {/* Central Search Bar with Autocomplete Dropdown */}
+        <div ref={searchContainerRef} className="hidden md:flex flex-1 max-w-md relative items-center">
+          <form onSubmit={handleSearchSubmit} className="w-full relative">
             <input
               type="text"
               placeholder="Tìm kiếm sản phẩm, thương hiệu..."
               value={searchQuery}
+              onFocus={() => {
+                if (suggestions.length > 0) setIsSuggestOpen(true);
+              }}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-10 py-1.5 text-sm bg-border/40 hover:bg-border/60 focus:bg-background border border-transparent focus:border-border rounded-full outline-none transition"
+              className="w-full pl-9 pr-12 py-1.5 text-sm bg-border/40 hover:bg-border/60 focus:bg-background border border-transparent focus:border-border rounded-full outline-none transition"
             />
             <button
               type="submit"
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground cursor-pointer"
+              aria-label="Tìm kiếm"
             >
               <Search size={16} />
             </button>
-            <button
-              type="button"
-              onClick={handleVoiceSearch}
-              title="Tìm kiếm bằng giọng nói"
-              className={`absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-foreground transition cursor-pointer ${
-                isListening ? "text-red-500 animate-pulse" : ""
-              }`}
-            >
-              <Mic size={15} />
-            </button>
-          </div>
-        </form>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {isSuggestLoading && (
+                <Loader2 size={14} className="animate-spin text-muted" />
+              )}
+              <button
+                type="button"
+                onClick={handleVoiceSearch}
+                title="Tìm kiếm bằng giọng nói"
+                className={`p-1 text-muted hover:text-foreground transition cursor-pointer ${
+                  isListening ? "text-red-500 animate-pulse" : ""
+                }`}
+              >
+                <Mic size={15} />
+              </button>
+            </div>
+          </form>
+
+          {/* Autocomplete Dropdown Popover */}
+          {isSuggestOpen && (
+            <div className="absolute top-full left-0 right-0 mt-2 bg-background border border-border rounded-xl shadow-2xl py-2 z-50 overflow-hidden max-h-[440px] overflow-y-auto animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="px-3.5 py-1.5 text-[11px] font-semibold text-muted uppercase tracking-wider border-b border-border flex justify-between items-center">
+                <span>Gợi ý sản phẩm ({suggestions.length})</span>
+                {isSuggestLoading && <span className="text-[10px] lowercase text-muted">đang tìm...</span>}
+              </div>
+
+              {suggestions.length === 0 && !isSuggestLoading ? (
+                <div className="p-4 text-center text-xs text-muted">
+                  Không tìm thấy sản phẩm phù hợp với &quot;{searchQuery}&quot;
+                </div>
+              ) : (
+                <div className="divide-y divide-border/50">
+                  {suggestions.map((item) => (
+                    <Link
+                      key={item.id}
+                      href={`/products/${item.slug}`}
+                      onClick={() => setIsSuggestOpen(false)}
+                      className="flex items-center gap-3 p-2.5 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 transition group"
+                    >
+                      <div className="w-11 h-14 bg-neutral-100 rounded overflow-hidden flex-shrink-0">
+                        <img
+                          src={item.primaryImage}
+                          alt={item.title}
+                          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform"
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          {item.categoryName && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-neutral-100 dark:bg-neutral-800 text-muted font-medium">
+                              {item.categoryName}
+                            </span>
+                          )}
+                          {item.brandName && (
+                            <span className="text-[10px] text-muted truncate">
+                              • {item.brandName}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-xs font-medium text-foreground truncate group-hover:text-amber-600 transition">
+                          {item.title}
+                        </h4>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs font-semibold text-foreground">
+                            {new Intl.NumberFormat("vi-VN", {
+                              style: "currency",
+                              currency: "VND",
+                            }).format(item.basePrice)}
+                          </span>
+                          {item.compareAtPrice && (
+                            <span className="text-[10px] text-muted line-through">
+                              {new Intl.NumberFormat("vi-VN", {
+                                style: "currency",
+                                currency: "VND",
+                              }).format(item.compareAtPrice)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+
+              {searchQuery.trim() && (
+                <div className="p-2 border-t border-border bg-neutral-50/50 dark:bg-neutral-900/40">
+                  <button
+                    onClick={() => handleSearchSubmit()}
+                    className="w-full py-1.5 px-3 text-xs font-medium text-foreground hover:bg-neutral-200/50 dark:hover:bg-neutral-800 rounded-md flex items-center justify-center gap-1.5 transition"
+                  >
+                    Xem tất cả kết quả cho &quot;{searchQuery}&quot; <ArrowRight size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Right Actions */}
         <div className="flex items-center gap-2 sm:gap-3">
@@ -237,12 +370,18 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
             )}
           </div>
 
+          {/* Wishlist Link with Synchronized Counter Badge */}
           <Link
             href="/account/wishlist"
-            className="p-2 text-foreground hover:text-muted transition"
-            aria-label="Yêu thích"
+            className="p-2 relative text-foreground hover:text-muted transition"
+            aria-label="Danh sách yêu thích"
           >
             <Heart size={19} />
+            {wishlistCount > 0 && (
+              <span className="absolute top-1 right-1 bg-red-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                {wishlistCount > 9 ? "9+" : wishlistCount}
+              </span>
+            )}
           </Link>
 
           {/* Cart Trigger */}
@@ -273,7 +412,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
           <form onSubmit={handleSearchSubmit} className="relative mb-3">
             <input
               type="text"
-              placeholder="Tìm kiếm..."
+              placeholder="Tìm kiếm sản phẩm..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-4 py-2 text-sm bg-neutral-100 dark:bg-neutral-800 rounded-lg outline-none"
@@ -315,6 +454,20 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
             className="block text-sm py-2 font-medium text-red-500 font-semibold"
           >
             Ưu Đãi Đặc Biệt
+          </Link>
+          <Link
+            href="/account/wishlist"
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="flex items-center justify-between text-sm py-2 font-medium border-t border-border pt-3"
+          >
+            <span className="flex items-center gap-2">
+              <Heart size={16} className="text-red-500" /> Danh sách yêu thích
+            </span>
+            {wishlistCount > 0 && (
+              <span className="px-2 py-0.5 text-xs bg-red-100 dark:bg-red-950/40 text-red-600 rounded-full font-semibold">
+                {wishlistCount}
+              </span>
+            )}
           </Link>
 
           <div className="border-t border-border pt-3 space-y-2">

@@ -14,34 +14,7 @@ function slugify(text: string): string {
     .replace(/(^-|-$)+/g, "");
 }
 
-// Danh sách ảnh mẫu thời trang chất lượng cao từ Unsplash
-const FASHION_IMAGES = [
-  "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80",
-  "https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?w=800&q=80",
-  "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?w=800&q=80",
-  "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=800&q=80",
-  "https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?w=800&q=80",
-  "https://images.unsplash.com/photo-1591047139829-d91aecb6caea?w=800&q=80",
-  "https://images.unsplash.com/photo-1539533018447-63fcce2678e3?w=800&q=80",
-  "https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?w=800&q=80",
-  "https://images.unsplash.com/photo-1542272604-780c96856592?w=800&q=80",
-  "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=800&q=80",
-  "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=800&q=80",
-  "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=800&q=80",
-  "https://images.unsplash.com/photo-1576995853123-5a10305d93c0?w=800&q=80",
-  "https://images.unsplash.com/photo-1584917865442-de89df76afd3?w=800&q=80",
-  "https://images.unsplash.com/photo-1548036328-c9fa89d128fa?w=800&q=80",
-  "https://images.unsplash.com/photo-1549298916-b41d501d3772?w=800&q=80",
-  "https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?w=800&q=80",
-  "https://images.unsplash.com/photo-1608256246200-53e635b5b65f?w=800&q=80",
-  "https://images.unsplash.com/photo-1508296695146-257a814070b4?w=800&q=80",
-  "https://images.unsplash.com/photo-1553062407-98eeb64c6a62?w=800&q=80",
-  "https://images.unsplash.com/photo-1589310243389-9685cdd32470?w=800&q=80",
-  "https://images.unsplash.com/photo-1598033129183-c4f50c736f10?w=800&q=80",
-  "https://images.unsplash.com/photo-1560769629-975ec94e6a86?w=800&q=80",
-  "https://images.unsplash.com/photo-1578932750294-f5075e85f44a?w=800&q=80",
-  "https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=800&q=80",
-];
+import { CATEGORY_IMAGES } from "./category-images";
 
 // Danh mục mẫu
 const CATEGORIES_DATA = [
@@ -304,15 +277,16 @@ async function main() {
         },
       });
 
-      // Ảnh sản phẩm (1 ảnh chính + 1-2 ảnh phụ)
-      const primaryImgIdx = (productCounter * 2) % FASHION_IMAGES.length;
-      const secondaryImgIdx = (primaryImgIdx + 1) % FASHION_IMAGES.length;
-      const thirdImgIdx = (primaryImgIdx + 2) % FASHION_IMAGES.length;
+      // Ảnh sản phẩm chuẩn xác theo danh mục (1 ảnh chính + 1-2 ảnh phụ)
+      const catImages = CATEGORY_IMAGES[cat.slug] || CATEGORY_IMAGES["ao-nam"];
+      const primaryImgIdx = i % catImages.length;
+      const secondaryImgIdx = (i + 1) % catImages.length;
+      const thirdImgIdx = (i + 2) % catImages.length;
 
       imagesToInsert.push({
         id: `img_${crypto.randomBytes(8).toString("hex")}`,
         productId,
-        url: FASHION_IMAGES[primaryImgIdx],
+        url: catImages[primaryImgIdx],
         altText: `${title} - Mặt trước`,
         order: 0,
         isPrimary: true,
@@ -321,7 +295,7 @@ async function main() {
       imagesToInsert.push({
         id: `img_${crypto.randomBytes(8).toString("hex")}`,
         productId,
-        url: FASHION_IMAGES[secondaryImgIdx],
+        url: catImages[secondaryImgIdx],
         altText: `${title} - Chi tiết chất liệu`,
         order: 1,
         isPrimary: false,
@@ -331,7 +305,7 @@ async function main() {
         imagesToInsert.push({
           id: `img_${crypto.randomBytes(8).toString("hex")}`,
           productId,
-          url: FASHION_IMAGES[thirdImgIdx],
+          url: catImages[thirdImgIdx],
           altText: `${title} - Phối cảnh người mẫu`,
           order: 2,
           isPrimary: false,
@@ -363,7 +337,7 @@ async function main() {
               color: col.name,
               size: sz,
             },
-            image: c === 0 ? FASHION_IMAGES[primaryImgIdx] : FASHION_IMAGES[secondaryImgIdx],
+            image: c === 0 ? catImages[primaryImgIdx] : catImages[secondaryImgIdx],
           });
         }
       }

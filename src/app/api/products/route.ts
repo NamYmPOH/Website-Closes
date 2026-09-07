@@ -5,6 +5,54 @@ import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
+function normalizeVietnamese(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, "d")
+    .trim();
+}
+
+function resolveCategorySlugs(param: string | null): { slugs: string[]; isNew: boolean; isSale: boolean } {
+  if (!param) return { slugs: [], isNew: false, isSale: false };
+
+  const rawList = param.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const resolved: string[] = [];
+  let isNew = false;
+  let isSale = false;
+
+  for (const item of rawList) {
+    if (item === "men") {
+      resolved.push("ao-nam", "quan-nam");
+    } else if (item === "women") {
+      resolved.push("ao-nu", "dam-vay", "quan-nu");
+    } else if (item === "accessories") {
+      resolved.push("phu-kien", "tui-xach-balo");
+    } else if (item === "shoes") {
+      resolved.push("giay-dep");
+    } else if (item === "outerwear") {
+      resolved.push("ao-khoac-outerwear");
+    } else if (item === "activewear") {
+      resolved.push("activewear");
+    } else if (item === "ao-thun") {
+      resolved.push("ao-nam", "ao-nu");
+    } else if (item === "so-mi") {
+      resolved.push("ao-nam", "ao-nu");
+    } else if (item === "quan") {
+      resolved.push("quan-nam", "quan-nu");
+    } else if (item === "new") {
+      isNew = true;
+    } else if (item === "sale") {
+      isSale = true;
+    } else {
+      resolved.push(item);
+    }
+  }
+
+  return { slugs: Array.from(new Set(resolved)), isNew, isSale };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -15,7 +63,7 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit;
 
     const query = searchParams.get("q")?.trim() || "";
-    const categorySlug = searchParams.get("category");
+    const categoryParam = searchParams.get("category");
     const brandSlug = searchParams.get("brand");
     const minPrice = searchParams.get("minPrice") ? parseFloat(searchParams.get("minPrice")!) : undefined;
     const maxPrice = searchParams.get("maxPrice") ? parseFloat(searchParams.get("maxPrice")!) : undefined;
@@ -23,14 +71,18 @@ export async function GET(request: NextRequest) {
     const color = searchParams.get("color");
     const size = searchParams.get("size");
     const inStockOnly = searchParams.get("inStock") === "true";
+    const isSaleParam = searchParams.get("sale") === "true";
     const sortBy = searchParams.get("sortBy") || "newest"; // newest, price-asc, price-desc, bestselling, rating
 
-    // 2. Tạo Cache Key duy nhất theo Filter Params
+    const { slugs: resolvedCategorySlugs, isNew: isCategoryNew, isSale: isCategorySale } =
+      resolveCategorySlugs(categoryParam);
+
+    // 2. Cache Key duy nhất
     const cacheKey = `products:${JSON.stringify({
       page,
       limit,
       query,
-      categorySlug,
+      categoryParam,
       brandSlug,
       minPrice,
       maxPrice,
@@ -38,30 +90,50 @@ export async function GET(request: NextRequest) {
       color,
       size,
       inStockOnly,
+      isSaleParam,
       sortBy,
     })}`;
 
-    // 3. Thực thi truy vấn với Cache-aside (Redis TTL 120s)
+    // 3. Thực thi truy vấn với Cache
     const result = await getOrSetCache(
       cacheKey,
       async () => {
-        // Xây dựng điều kiện WHERE động
         const whereClause: Prisma.ProductWhereInput = {
           status: "PUBLISHED",
         };
 
-        // Lọc theo từ khóa tìm kiếm (Title, Meta Keywords)
+        // Lọc theo từ khóa tìm kiếm tiếng Việt và không dấu
         if (query) {
+          const normQuery = normalizeVietnamese(query);
+          const slugQuery = normQuery.replace(/\s+/g, "-");
+
           whereClause.OR = [
             { title: { contains: query, mode: "insensitive" } },
+            { slug: { contains: slugQuery, mode: "insensitive" } },
             { shortDescription: { contains: query, mode: "insensitive" } },
+            { category: { name: { contains: query, mode: "insensitive" } } },
+            { brand: { name: { contains: query, mode: "insensitive" } } },
             { keywords: { has: query } },
           ];
         }
 
-        // Lọc theo Category
-        if (categorySlug) {
-          whereClause.category = { slug: categorySlug };
+        // Lọc theo Danh mục (hỗ trợ đa danh mục và alias)
+        if (resolvedCategorySlugs.length > 0) {
+          whereClause.category = {
+            slug: { in: resolvedCategorySlugs },
+          };
+        }
+
+        // Lọc Hàng Mới (New Arrivals)
+        if (isCategoryNew) {
+          whereClause.isNewArrival = true;
+        }
+
+        // Lọc Hàng Giảm Giá (Sale)
+        if (isSaleParam || isCategorySale) {
+          whereClause.compareAtPrice = {
+            gt: 0,
+          };
         }
 
         // Lọc theo Brand
@@ -107,7 +179,7 @@ export async function GET(request: NextRequest) {
           };
         }
 
-        // Xác định thứ tự sắp xếp (Sorting)
+        // Xác định thứ tự sắp xếp
         let orderBy: Prisma.ProductOrderByWithRelationInput = { createdAt: "desc" };
         switch (sortBy) {
           case "price-asc":
@@ -128,7 +200,7 @@ export async function GET(request: NextRequest) {
             break;
         }
 
-        // Chạy song song query dữ liệu và đếm tổng số bản ghi
+        // Chạy song song query và count
         const [products, totalCount] = await Promise.all([
           prisma.product.findMany({
             where: whereClause,
@@ -161,7 +233,7 @@ export async function GET(request: NextRequest) {
           prisma.product.count({ where: whereClause }),
         ]);
 
-        // Transform và gắn Dynamic Badges (NEW, SALE %, OUT_OF_STOCK)
+        // Transform dữ liệu
         const transformedProducts = products.map((item) => {
           const totalStock = item.variants.reduce((acc, v) => acc + v.stockQuantity, 0);
           const isOutOfStock = totalStock === 0;
@@ -176,7 +248,7 @@ export async function GET(request: NextRequest) {
           }
 
           const isNew =
-            new Date().getTime() - new Date(item.createdAt).getTime() < 14 * 24 * 60 * 60 * 1000;
+            new Date().getTime() - new Date(item.createdAt).getTime() < 30 * 24 * 60 * 60 * 1000;
 
           return {
             id: item.id,
@@ -210,84 +282,32 @@ export async function GET(request: NextRequest) {
           },
         };
       },
-      120 // Caching trong 2 phút
+      60 // 1 phút caching
     );
 
     return NextResponse.json(result, {
       status: 200,
       headers: {
-        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
+        "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
         "X-Data-Source": "postgresql",
       },
     });
   } catch (error: any) {
-    console.warn("[API_PRODUCTS_DB_FALLBACK]", error.message);
-
-    // Dữ liệu mẫu dự phòng khi database chưa được khởi động (Graceful Degradation)
-    const fallbackProducts = [
-      {
-        id: "prod-1",
-        title: "Áo Thun Heavyweight Organic Cotton",
-        slug: "ao-thun-heavyweight-organic-cotton",
-        basePrice: 420000,
-        compareAtPrice: 550000,
-        primaryImage: "https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=800&q=80",
-        brand: { id: "b1", name: "AURA Essentials", slug: "aura-essentials" },
-        category: { id: "c1", name: "Áo", slug: "ao" },
-        averageRating: 4.9,
-        reviewCount: 128,
-        badges: { isNew: true, isOutOfStock: false, discountPercent: 24 },
-        variantCount: 4,
-      },
-      {
-        id: "prod-2",
-        title: "Quần Linen Relaxed Trousers",
-        slug: "quan-linen-relaxed-trousers",
-        basePrice: 790000,
-        compareAtPrice: null,
-        primaryImage: "https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?w=800&q=80",
-        brand: { id: "b2", name: "AURA Tailored", slug: "aura-tailored" },
-        category: { id: "c2", name: "Quần", slug: "quan" },
-        averageRating: 4.8,
-        reviewCount: 94,
-        badges: { isNew: true, isOutOfStock: false, discountPercent: 0 },
-        variantCount: 3,
-      },
-      {
-        id: "prod-3",
-        title: "Túi Tote Canvas Nhật Bản Tối Giản",
-        slug: "tui-tote-canvas-nhat-ban",
-        basePrice: 350000,
-        compareAtPrice: 450000,
-        primaryImage: "https://images.unsplash.com/photo-1544816155-12df9643f363?w=800&q=80",
-        brand: { id: "b3", name: "AURA Objects", slug: "aura-objects" },
-        category: { id: "c3", name: "Phụ kiện", slug: "phu-kien" },
-        averageRating: 5.0,
-        reviewCount: 62,
-        badges: { isNew: false, isOutOfStock: false, discountPercent: 22 },
-        variantCount: 2,
-      },
-    ];
-
+    console.error("[API_PRODUCTS_ERROR]", error.message);
     return NextResponse.json(
       {
-        items: fallbackProducts,
+        items: [],
         pagination: {
           page: 1,
           limit: 16,
-          totalCount: fallbackProducts.length,
-          totalPages: 1,
+          totalCount: 0,
+          totalPages: 0,
           hasNextPage: false,
           hasPrevPage: false,
         },
-        notice: "Đang phục vụ dữ liệu mẫu (Database chưa kết nối hoặc đang khởi động)",
+        error: "Không thể truy vấn dữ liệu sản phẩm.",
       },
-      {
-        status: 200,
-        headers: {
-          "X-Data-Source": "fallback-catalog",
-        },
-      }
+      { status: 500 }
     );
   }
 }

@@ -15,6 +15,7 @@ interface CartStoreState {
   items: CartItemStore[];
   isMiniCartOpen: boolean;
   wishlist: string[]; // Danh sách product id
+  wishlistProducts: ProductItem[]; // Danh sách sản phẩm yêu thích đầy đủ
   couponCode: string | null;
   discountPercentage: number;
   
@@ -27,7 +28,7 @@ interface CartStoreState {
   closeMiniCart: () => void;
   applyCoupon: (code: string) => { success: boolean; message: string };
   removeCoupon: () => void;
-  toggleWishlist: (productId: string) => void;
+  toggleWishlist: (product: ProductItem | string) => void;
   isInWishlist: (productId: string) => boolean;
   
   // Computations
@@ -44,6 +45,7 @@ export const useCartStore = create<CartStoreState>()(
       items: [],
       isMiniCartOpen: false,
       wishlist: [],
+      wishlistProducts: [],
       couponCode: null,
       discountPercentage: 0,
 
@@ -101,14 +103,25 @@ export const useCartStore = create<CartStoreState>()(
 
       removeCoupon: () => set({ couponCode: null, discountPercentage: 0 }),
 
-      toggleWishlist: (productId: string) => {
+      toggleWishlist: (product: ProductItem | string) => {
+        const productId = typeof product === "string" ? product : product.id;
         set((state) => {
           const exists = state.wishlist.includes(productId);
-          return {
-            wishlist: exists
-              ? state.wishlist.filter((id) => id !== productId)
-              : [...state.wishlist, productId],
-          };
+          if (exists) {
+            return {
+              wishlist: state.wishlist.filter((id) => id !== productId),
+              wishlistProducts: state.wishlistProducts.filter((p) => p.id !== productId),
+            };
+          } else {
+            const newWishlist = [...state.wishlist, productId];
+            const newProducts = typeof product === "object"
+              ? [...state.wishlistProducts.filter((p) => p.id !== productId), product]
+              : state.wishlistProducts;
+            return {
+              wishlist: newWishlist,
+              wishlistProducts: newProducts,
+            };
+          }
         });
       },
 
@@ -148,6 +161,7 @@ export const useCartStore = create<CartStoreState>()(
       partialize: (state) => ({
         items: state.items,
         wishlist: state.wishlist,
+        wishlistProducts: state.wishlistProducts,
         couponCode: state.couponCode,
         discountPercentage: state.discountPercentage,
       }),
