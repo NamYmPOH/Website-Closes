@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, Suspense, useRef } from "react";
+import React, { useState, useEffect, Suspense, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { signIn, useSession, signOut } from "next-auth/react";
@@ -34,6 +34,7 @@ function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberPassword, setRememberPassword] = useState(false);
   const [is2FARequired, setIs2FARequired] = useState(false);
   const [twoFactorCode, setTwoFactorCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -45,6 +46,27 @@ function LoginForm() {
       ? "Mật khẩu đã được cập nhật thành công! Vui lòng đăng nhập."
       : ""
   );
+
+  // Tự động đọc và điền thông tin đăng nhập đã được ghi nhớ từ localStorage
+  useEffect(() => {
+    try {
+      const savedAuth = localStorage.getItem("aura_remembered_credentials");
+      if (savedAuth) {
+        const parsed = JSON.parse(savedAuth);
+        if (parsed?.email && parsed?.password) {
+          setEmail(parsed.email);
+          try {
+            setPassword(atob(parsed.password));
+          } catch {
+            setPassword(parsed.password);
+          }
+          setRememberPassword(true);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not read remembered credentials:", err);
+    }
+  }, []);
 
   // Nếu người dùng ĐÃ có phiên đăng nhập hợp lệ (ví dụ tài khoản "nam" từ tab khác)
   if (status === "authenticated" && session?.user) {
@@ -102,6 +124,25 @@ function LoginForm() {
   const handleSelectRecentAccount = (selectedEmail: string) => {
     setEmail(selectedEmail);
     setErrorMessage("");
+
+    try {
+      const savedAuth = localStorage.getItem("aura_remembered_credentials");
+      if (savedAuth) {
+        const parsed = JSON.parse(savedAuth);
+        if (parsed?.email?.toLowerCase() === selectedEmail.toLowerCase() && parsed?.password) {
+          try {
+            setPassword(atob(parsed.password));
+          } catch {
+            setPassword(parsed.password);
+          }
+          setRememberPassword(true);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Could not check remembered password for selected account:", err);
+    }
+
     setTimeout(() => {
       passwordInputRef.current?.focus();
     }, 100);
@@ -110,6 +151,7 @@ function LoginForm() {
   const handleUseOtherAccount = () => {
     setEmail("");
     setPassword("");
+    setRememberPassword(false);
     setErrorMessage("");
   };
 
@@ -142,6 +184,28 @@ function LoginForm() {
         return;
       }
 
+      // Xử lý Ghi nhớ mật khẩu (Tuyệt đối không tự động lưu mật khẩu Admin)
+      if (rememberPassword && !email.toLowerCase().includes("admin")) {
+        try {
+          localStorage.setItem(
+            "aura_remembered_credentials",
+            JSON.stringify({
+              email: email.trim(),
+              password: btoa(password),
+              savedAt: new Date().toISOString(),
+            })
+          );
+        } catch (e) {
+          console.warn("Failed to save credentials to localStorage:", e);
+        }
+      } else {
+        try {
+          localStorage.removeItem("aura_remembered_credentials");
+        } catch (e) {
+          console.warn("Failed to remove credentials from localStorage:", e);
+        }
+      }
+
       // Lưu vào recent logins (tối đa 2, tuyệt đối loại trừ admin)
       if (!email.toLowerCase().includes("admin")) {
         saveLogin({
@@ -162,7 +226,7 @@ function LoginForm() {
         }
         router.refresh();
       }, 500);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setErrorMessage("Không thể kết nối đến máy chủ xác thực. Vui lòng thử lại.");
       setLoading(false);
     }
@@ -273,17 +337,9 @@ function LoginForm() {
         </div>
 
         <div className="space-y-1.5 text-xs">
-          <div className="flex justify-between items-center">
-            <label className="font-semibold text-foreground flex items-center gap-1.5">
-              <Lock size={13} className="text-muted" /> Mật khẩu
-            </label>
-            <Link
-              href="/auth/forgot-password"
-              className="text-muted hover:text-foreground underline transition"
-            >
-              Quên mật khẩu?
-            </Link>
-          </div>
+          <label className="font-semibold text-foreground flex items-center gap-1.5">
+            <Lock size={13} className="text-muted" /> Mật khẩu
+          </label>
           <div className="relative">
             <input
               ref={passwordInputRef}
@@ -297,11 +353,34 @@ function LoginForm() {
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground cursor-pointer"
               aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
             >
               {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
+          </div>
+
+          <div className="flex items-center justify-between text-xs pt-1">
+            <label
+              htmlFor="remember-password"
+              className="flex items-center gap-2 cursor-pointer select-none text-muted hover:text-foreground transition py-0.5"
+            >
+              <input
+                type="checkbox"
+                id="remember-password"
+                checked={rememberPassword}
+                onChange={(e) => setRememberPassword(e.target.checked)}
+                className="w-4 h-4 rounded border-border text-foreground focus:ring-foreground cursor-pointer accent-foreground"
+              />
+              <span className="font-medium">Ghi nhớ mật khẩu</span>
+            </label>
+
+            <Link
+              href="/auth/forgot-password"
+              className="text-muted hover:text-foreground underline transition"
+            >
+              Quên mật khẩu?
+            </Link>
           </div>
         </div>
 

@@ -1,5 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { OrderStatus, PaymentStatus } from "@prisma/client";
+
+// Bảng ánh xạ tất cả các biến thể trạng thái (lowercase / tiếng Anh) sang OrderStatus chuẩn của Prisma
+const STATUS_MAP: Record<string, OrderStatus> = {
+  pending: OrderStatus.PENDING,
+  confirmed: OrderStatus.CONFIRMED,
+  processing: OrderStatus.PROCESSING,
+  shipped: OrderStatus.SHIPPED,
+  delivering: OrderStatus.SHIPPED,
+  delivered: OrderStatus.DELIVERED,
+  completed: OrderStatus.DELIVERED,
+  cancelled: OrderStatus.CANCELLED,
+  canceled: OrderStatus.CANCELLED,
+  refunded: OrderStatus.REFUNDED,
+  returned: OrderStatus.RETURNED,
+};
+
+const VALID_STATUSES = Object.keys(STATUS_MAP);
 
 export async function POST(
   request: NextRequest,
@@ -15,26 +33,16 @@ export async function POST(
       return NextResponse.json({ error: "Thiếu ID đơn hàng" }, { status: 400 });
     }
 
-    const VALID_STATUSES = ["pending", "confirmed", "delivering", "completed", "cancelled", "returned"];
     if (!VALID_STATUSES.includes(rawStatus)) {
       return NextResponse.json(
-        { error: `Trạng thái không hợp lệ. Cho phép: ${VALID_STATUSES.join(", ")}` },
+        { error: `Trạng thái không hợp lệ: "${rawStatus}". Cho phép: ${VALID_STATUSES.join(", ")}` },
         { status: 400 }
       );
     }
 
-    // Map to Prisma OrderStatus enum
-    const statusMap: Record<string, string> = {
-      pending: "PENDING",
-      confirmed: "CONFIRMED",
-      delivering: "SHIPPED",
-      completed: "DELIVERED",
-      cancelled: "CANCELLED",
-      returned: "RETURNED",
-    };
-    const targetStatus = statusMap[rawStatus] as any;
+    const targetStatus = STATUS_MAP[rawStatus];
 
-    // Run database transaction to ensure atomicity
+    // Chạy transaction để đảm bảo toàn vẹn dữ liệu tồn kho & điểm tích lũy
     const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findFirst({
         where: {
@@ -57,7 +65,7 @@ export async function POST(
       const currentStatus = order.status;
 
       // Không cho phép thay đổi nếu đã hoàn thành (Finalized)
-      if (currentStatus === "DELIVERED" && targetStatus !== "DELIVERED") {
+      if (currentStatus === OrderStatus.DELIVERED && targetStatus !== OrderStatus.DELIVERED) {
         throw new Error("Đơn hàng đã hoàn thành (DELIVERED), không thể rollback hoặc đổi trạng thái.");
       }
 
@@ -68,17 +76,43 @@ export async function POST(
 
       const alerts: string[] = [];
 
-      // 1. Chuyển từ PENDING sang CONFIRMED (Trừ thật vào kho, giảm reserved)
-      if (currentStatus === "PENDING" && targetStatus === "CONFIRMED") {
+      const FORWARD_STOCK_STATUSES: readonly OrderStatus[] = [
+        OrderStatus.CONFIRMED,
+        OrderStatus.PROCESSING,
+        OrderStatus.SHIPPED,
+        OrderStatus.DELIVERED,
+      ];
+
+      const REVERT_FROM_STATUSES: readonly OrderStatus[] = [
+        OrderStatus.CONFIRMED,
+        OrderStatus.PROCESSING,
+        OrderStatus.SHIPPED,
+      ];
+
+      const REVERT_TO_STATUSES: readonly OrderStatus[] = [
+        OrderStatus.CANCELLED,
+        OrderStatus.REFUNDED,
+        OrderStatus.RETURNED,
+      ];
+
+      // 1. Chuyển từ PENDING sang CONFIRMED, PROCESSING, SHIPPED hoặc DELIVERED
+      // (Trừ kho thực tế và giải phóng số lượng giữ chỗ reservedQuantity)
+      if (
+        currentStatus === OrderStatus.PENDING &&
+        FORWARD_STOCK_STATUSES.includes(targetStatus)
+      ) {
         for (const item of order.items) {
           const qty = item.quantity;
-          const variant = await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: {
-              reservedQuantity: { decrement: qty },
-              stockQuantity: { decrement: qty },
-            },
-          });
+          let variant = null;
+          if (item.variantId) {
+            variant = await tx.productVariant.update({
+              where: { id: item.variantId },
+              data: {
+                reservedQuantity: { decrement: qty },
+                stockQuantity: { decrement: qty },
+              },
+            });
+          }
 
           const product = await tx.product.update({
             where: { id: item.productId },
@@ -93,31 +127,35 @@ export async function POST(
               productId: item.productId,
               variantId: item.variantId,
               orderId: order.id,
-              changeType: "CONFIRMED",
+              changeType: targetStatus,
               quantityChange: -qty,
-              reason: reason || `Xác nhận thanh toán đơn #${order.orderNumber} (trừ kho thật)`,
+              reason: reason || `Cập nhật trạng thái đơn #${order.orderNumber} sang ${targetStatus} (trừ kho thật)`,
             },
           });
 
-          const avail = variant.stockQuantity - variant.reservedQuantity;
-          if (avail <= variant.reorderThreshold) {
-            alerts.push(
-              `Cảnh báo tồn kho: Sản phẩm "${product.title}" (${variant.sku}) chỉ còn ${avail} chiếc (ngưỡng: ${variant.reorderThreshold})`
-            );
+          if (variant) {
+            const avail = variant.stockQuantity - variant.reservedQuantity;
+            if (avail <= variant.reorderThreshold) {
+              alerts.push(
+                `Cảnh báo tồn kho: Sản phẩm "${product.title}" (${variant.sku}) chỉ còn ${avail} chiếc (ngưỡng: ${variant.reorderThreshold})`
+              );
+            }
           }
         }
       }
 
-      // 2. Chuyển từ PENDING sang CANCELLED (Giải phóng reservedQuantity)
-      else if (currentStatus === "PENDING" && targetStatus === "CANCELLED") {
+      // 2. Chuyển từ PENDING sang CANCELLED (Chỉ giải phóng reservedQuantity vì chưa trừ kho thật)
+      else if (currentStatus === OrderStatus.PENDING && targetStatus === OrderStatus.CANCELLED) {
         for (const item of order.items) {
           const qty = item.quantity;
-          await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: {
-              reservedQuantity: { decrement: qty },
-            },
-          });
+          if (item.variantId) {
+            await tx.productVariant.update({
+              where: { id: item.variantId },
+              data: {
+                reservedQuantity: { decrement: qty },
+              },
+            });
+          }
 
           await tx.product.update({
             where: { id: item.productId },
@@ -139,19 +177,22 @@ export async function POST(
         }
       }
 
-      // 3. Chuyển từ CONFIRMED / PROCESSING / SHIPPED sang CANCELLED hoặc RETURNED (Hoàn trả tồn kho)
+      // 3. Chuyển từ CONFIRMED / PROCESSING / SHIPPED sang CANCELLED, REFUNDED hoặc RETURNED
+      // (Đã trừ kho thật trước đó -> hoàn lại stockQuantity cho kho)
       else if (
-        ["CONFIRMED", "PROCESSING", "SHIPPED"].includes(currentStatus) &&
-        ["CANCELLED", "RETURNED"].includes(targetStatus)
+        REVERT_FROM_STATUSES.includes(currentStatus) &&
+        REVERT_TO_STATUSES.includes(targetStatus)
       ) {
         for (const item of order.items) {
           const qty = item.quantity;
-          await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: {
-              stockQuantity: { increment: qty },
-            },
-          });
+          if (item.variantId) {
+            await tx.productVariant.update({
+              where: { id: item.variantId },
+              data: {
+                stockQuantity: { increment: qty },
+              },
+            });
+          }
 
           await tx.product.update({
             where: { id: item.productId },
@@ -165,16 +206,16 @@ export async function POST(
               productId: item.productId,
               variantId: item.variantId,
               orderId: order.id,
-              changeType: targetStatus === "RETURNED" ? "RETURNED" : "CANCELLED",
+              changeType: targetStatus,
               quantityChange: qty,
-              reason: reason || `Đơn hàng #${order.orderNumber} bị hủy/hoàn trả (hoàn lại kho)`,
+              reason: reason || `Đơn hàng #${order.orderNumber} chuyển sang ${targetStatus} (hoàn lại kho)`,
             },
           });
         }
       }
 
-      // 4. Khi hoàn thành đơn hàng (DELIVERED) -> Finalize & Tự động cộng điểm tích lũy (Task 2)
-      if (targetStatus === "DELIVERED") {
+      // 4. Khi hoàn thành đơn hàng (DELIVERED) -> Finalize & Tự động cộng điểm tích lũy
+      if (targetStatus === OrderStatus.DELIVERED) {
         // Tích lũy điểm: Mỗi 1.000đ chi tiêu = 1 điểm
         const pointsEarned = Math.floor(Number(order.totalAmount) / 1000);
 
@@ -222,12 +263,19 @@ export async function POST(
         }
       }
 
-      // Cập nhật trạng thái đơn hàng
+      // Cập nhật trạng thái đơn hàng và trạng thái thanh toán
+      let paymentStatus = order.paymentStatus;
+      if (targetStatus === OrderStatus.CONFIRMED || targetStatus === OrderStatus.DELIVERED) {
+        paymentStatus = PaymentStatus.PAID;
+      } else if (targetStatus === OrderStatus.CANCELLED || targetStatus === OrderStatus.REFUNDED) {
+        paymentStatus = currentStatus === OrderStatus.PENDING ? PaymentStatus.UNPAID : PaymentStatus.FAILED;
+      }
+
       const updatedOrder = await tx.order.update({
         where: { id: order.id },
         data: {
           status: targetStatus,
-          paymentStatus: targetStatus === "CONFIRMED" || targetStatus === "DELIVERED" ? "PAID" : order.paymentStatus,
+          paymentStatus,
         },
         include: {
           items: true,
@@ -243,11 +291,12 @@ export async function POST(
       order: result.order,
       alerts: result.alerts,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Lỗi khi cập nhật trạng thái đơn hàng";
     console.error("Order status update error:", error);
     return NextResponse.json(
-      { error: error.message || "Lỗi khi cập nhật trạng thái đơn hàng" },
-      { status: 500 }
+      { error: message },
+      { status: 400 }
     );
   }
 }
