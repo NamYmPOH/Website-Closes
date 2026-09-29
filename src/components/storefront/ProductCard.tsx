@@ -1,33 +1,24 @@
 "use client";
 
-import React from "react";
+import React, { memo } from "react";
 import Link from "next/link";
-import { Plus, Heart, ShoppingBag } from "lucide-react";
+import Image from "next/image";
+import { Plus, Heart } from "lucide-react";
 import { useCartStore } from "@/stores/cartStore";
+import { formatCurrency } from "@/lib/utils/format";
+import { Badge } from "@/components/ui/Badge";
+import { ProductItem } from "@/types/product";
 
-export interface ProductItem {
-  id: string;
-  title: string;
-  slug: string;
-  basePrice: number;
-  compareAtPrice?: number | null;
-  primaryImage: string;
-  category?: any;
-  brand?: any;
-  badges?: {
-    isNew?: boolean;
-    isOutOfStock?: boolean;
-    discountPercent?: number;
-  };
-}
+// Re-export để đảm bảo không gãy import ở bất kỳ đâu
+export type { ProductItem };
 
-interface ProductCardProps {
+export interface ProductCardProps {
   product: ProductItem;
   onAddToCart?: (product: ProductItem) => void;
   isListView?: boolean;
 }
 
-export default function ProductCard({
+function ProductCardComponent({
   product,
   onAddToCart,
   isListView = false,
@@ -35,54 +26,59 @@ export default function ProductCard({
   const { toggleWishlist, isInWishlist } = useCartStore();
   const isLiked = isInWishlist(product.id);
 
-  const formattedPrice = new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-  }).format(product.basePrice);
-
+  const formattedPrice = formatCurrency(product.basePrice);
   const formattedComparePrice = product.compareAtPrice
-    ? new Intl.NumberFormat("vi-VN", {
-        style: "currency",
-        currency: "VND",
-      }).format(product.compareAtPrice)
+    ? formatCurrency(product.compareAtPrice)
     : null;
 
-  const isOutOfStock = product.badges?.isOutOfStock;
+  const isOutOfStock = Boolean(product.badges?.isOutOfStock);
 
   const brandName =
-    typeof product.brand === "object"
-      ? (product.brand as any)?.name
+    typeof product.brand === "object" && product.brand !== null
+      ? product.brand.name
       : typeof product.brand === "string"
       ? product.brand
       : null;
 
   const categoryName =
-    typeof product.category === "object"
-      ? (product.category as any)?.name
+    typeof product.category === "object" && product.category !== null
+      ? product.category.name
       : typeof product.category === "string"
       ? product.category
       : null;
+
+  const renderBadge = () => {
+    if (isOutOfStock) {
+      return (
+        <Badge variant="default" className="bg-neutral-900 text-white shadow-xs">
+          Hết hàng
+        </Badge>
+      );
+    }
+    if (product.badges?.discountPercent) {
+      return (
+        <Badge variant="danger" className="shadow-xs">
+          -{product.badges.discountPercent}%
+        </Badge>
+      );
+    }
+    if (product.badges?.isNew) {
+      return (
+        <Badge variant="default" className="shadow-xs">
+          Mới
+        </Badge>
+      );
+    }
+    return null;
+  };
 
   if (isListView) {
     return (
       <div className="group flex flex-col sm:flex-row items-center gap-5 p-4 border border-border rounded-xl bg-background hover:border-foreground/40 transition">
         {/* Image Container */}
-        <div className="relative w-full sm:w-44 aspect-[3/4] rounded-lg overflow-hidden bg-neutral-100 flex-shrink-0">
-          {/* Dynamic Badges */}
+        <div className="relative w-full sm:w-44 aspect-[3/4] rounded-lg overflow-hidden bg-neutral-100 dark:bg-neutral-800 flex-shrink-0">
           <div className="absolute top-2.5 left-2.5 z-10 flex flex-col gap-1">
-            {isOutOfStock ? (
-              <span className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-neutral-900 text-white rounded">
-                Hết hàng
-              </span>
-            ) : product.badges?.discountPercent ? (
-              <span className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-red-600 text-white rounded">
-                -{product.badges.discountPercent}%
-              </span>
-            ) : product.badges?.isNew ? (
-              <span className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-foreground text-background rounded">
-                Mới
-              </span>
-            ) : null}
+            {renderBadge()}
           </div>
 
           {/* Wishlist Heart Button */}
@@ -96,18 +92,26 @@ export default function ProductCard({
           >
             <Heart
               size={15}
-              className={isLiked ? "fill-red-500 text-red-500" : "text-muted hover:text-foreground"}
+              className={
+                isLiked
+                  ? "fill-red-500 text-red-500"
+                  : "text-muted hover:text-foreground"
+              }
             />
           </button>
 
-          <Link href={`/products/${product.slug}`} className="block w-full h-full">
-            <img
+          <Link
+            href={`/products/${product.slug}`}
+            className="relative block w-full h-full"
+          >
+            <Image
               src={product.primaryImage}
               alt={product.title}
-              className={`w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 ${
+              fill
+              sizes="(max-width: 640px) 100vw, 176px"
+              className={`object-cover object-center group-hover:scale-105 transition-transform duration-500 ${
                 isOutOfStock ? "grayscale opacity-75" : ""
               }`}
-              loading="lazy"
             />
           </Link>
         </div>
@@ -136,9 +140,13 @@ export default function ProductCard({
             </Link>
 
             <div className="mt-2 flex items-center gap-3">
-              <span className="text-base font-bold text-foreground">{formattedPrice}</span>
+              <span className="text-base font-bold text-foreground">
+                {formattedPrice}
+              </span>
               {formattedComparePrice && (
-                <span className="text-xs text-muted line-through">{formattedComparePrice}</span>
+                <span className="text-xs text-muted line-through">
+                  {formattedComparePrice}
+                </span>
               )}
             </div>
           </div>
@@ -172,22 +180,9 @@ export default function ProductCard({
   return (
     <div className="group relative flex flex-col">
       {/* Product Image Container with Aspect Ratio */}
-      <div className="relative aspect-[3/4] w-full overflow-hidden bg-neutral-100 rounded-lg">
-        {/* Dynamic Badges */}
+      <div className="relative aspect-[3/4] w-full overflow-hidden bg-neutral-100 dark:bg-neutral-800 rounded-lg">
         <div className="absolute top-2.5 left-2.5 z-10 flex flex-col gap-1">
-          {isOutOfStock ? (
-            <span className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-neutral-900 text-white rounded shadow-xs">
-              Hết hàng
-            </span>
-          ) : product.badges?.discountPercent ? (
-            <span className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-red-600 text-white rounded shadow-xs">
-              -{product.badges.discountPercent}%
-            </span>
-          ) : product.badges?.isNew ? (
-            <span className="px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider bg-foreground text-background rounded shadow-xs">
-              Mới
-            </span>
-          ) : null}
+          {renderBadge()}
         </div>
 
         {/* Wishlist Heart Button */}
@@ -201,19 +196,27 @@ export default function ProductCard({
         >
           <Heart
             size={15}
-            className={isLiked ? "fill-red-500 text-red-500" : "text-muted hover:text-foreground"}
+            className={
+              isLiked
+                ? "fill-red-500 text-red-500"
+                : "text-muted hover:text-foreground"
+            }
           />
         </button>
 
         {/* Clickable Image Link */}
-        <Link href={`/products/${product.slug}`} className="block w-full h-full">
-          <img
+        <Link
+          href={`/products/${product.slug}`}
+          className="relative block w-full h-full"
+        >
+          <Image
             src={product.primaryImage}
             alt={product.title}
-            className={`w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 ease-out ${
+            fill
+            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+            className={`object-cover object-center group-hover:scale-105 transition-transform duration-500 ease-out ${
               isOutOfStock ? "grayscale opacity-75" : ""
             }`}
-            loading="lazy"
           />
         </Link>
 
@@ -252,12 +255,19 @@ export default function ProductCard({
         </Link>
 
         <div className="mt-1 flex items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">{formattedPrice}</span>
+          <span className="text-sm font-semibold text-foreground">
+            {formattedPrice}
+          </span>
           {formattedComparePrice && (
-            <span className="text-xs text-muted line-through">{formattedComparePrice}</span>
+            <span className="text-xs text-muted line-through">
+              {formattedComparePrice}
+            </span>
           )}
         </div>
       </div>
     </div>
   );
 }
+
+export const ProductCard = memo(ProductCardComponent);
+export default ProductCard;

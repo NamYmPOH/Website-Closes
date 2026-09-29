@@ -11,7 +11,7 @@ export interface RecentLoginEntry {
 }
 
 const STORAGE_KEY = "aura_recent_logins";
-const MAX_ENTRIES = 2;
+const MAX_ENTRIES = 3;
 
 export function useRecentLogins() {
   const [recentLogins, setRecentLogins] = useState<RecentLoginEntry[]>([]);

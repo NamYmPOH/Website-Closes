@@ -2,9 +2,12 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { useCartStore } from "@/stores/cartStore";
+import { formatCurrency } from "@/lib/utils/format";
+import { SearchSuggestItem } from "@/types/product";
 import {
   Search,
   ShoppingBag,
@@ -38,7 +41,7 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
   const [isListening, setIsListening] = useState(false);
 
   // Autocomplete Suggestions State
-  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<SearchSuggestItem[]>([]);
   const [isSuggestLoading, setIsSuggestLoading] = useState(false);
   const [isSuggestOpen, setIsSuggestOpen] = useState(false);
 
@@ -225,17 +228,19 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
                       onClick={() => setIsSuggestOpen(false)}
                       className="flex items-center gap-3 p-2.5 hover:bg-neutral-100 dark:hover:bg-neutral-800/60 transition group"
                     >
-                      <div className="w-11 h-14 bg-neutral-100 rounded overflow-hidden flex-shrink-0">
-                        <img
+                      <div className="relative w-11 h-14 bg-neutral-100 dark:bg-neutral-800 rounded overflow-hidden shrink-0">
+                        <Image
                           src={item.primaryImage}
                           alt={item.title}
-                          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform"
+                          fill
+                          sizes="44px"
+                          className="object-cover object-center group-hover:scale-105 transition-transform"
                         />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 mb-0.5">
                           {item.categoryName && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-neutral-100 dark:bg-neutral-800 text-muted font-medium">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-muted font-medium">
                               {item.categoryName}
                             </span>
                           )}
@@ -250,17 +255,11 @@ export default function Header({ cartCount = 0, onOpenCart }: HeaderProps) {
                         </h4>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-xs font-semibold text-foreground">
-                            {new Intl.NumberFormat("vi-VN", {
-                              style: "currency",
-                              currency: "VND",
-                            }).format(item.basePrice)}
+                            {formatCurrency(item.basePrice)}
                           </span>
                           {item.compareAtPrice && (
                             <span className="text-[10px] text-muted line-through">
-                              {new Intl.NumberFormat("vi-VN", {
-                                style: "currency",
-                                currency: "VND",
-                              }).format(item.compareAtPrice)}
+                              {formatCurrency(item.compareAtPrice)}
                             </span>
                           )}
                         </div>
