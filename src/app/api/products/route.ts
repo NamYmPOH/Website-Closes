@@ -319,6 +319,9 @@ export async function GET(request: NextRequest) {
     const inStockOnly = searchParams.get("inStock") === "true";
     const sortBy = searchParams.get("sortBy") || "newest";
 
+    const { slugs: resolvedCategorySlugs, isNew: isCategoryNew, isSale: isCategorySale } =
+      resolveCategorySlugs(categoryParam);
+
     let filtered = ALL_PRODUCTS.map((p) => {
       const isOutOfStock = Boolean(p.badges?.isOutOfStock);
       return {
@@ -328,8 +331,9 @@ export async function GET(request: NextRequest) {
         basePrice: p.basePrice,
         compareAtPrice: p.compareAtPrice,
         primaryImage: p.primaryImage,
-        brand: typeof p.brand === "string" ? { id: p.brand, name: p.brand, slug: p.brand } : p.brand,
-        category: typeof p.category === "string" ? { id: p.categorySlug || p.category, name: p.category, slug: p.categorySlug || p.category } : p.category,
+        brand: typeof p.brand === "string" ? p.brand : (p.brand as any)?.name || null,
+        category: typeof p.category === "string" ? p.category : (p.category as any)?.name || null,
+        categorySlug: (p as any).categorySlug || "",
         badges: {
           isOutOfStock,
           isNew: Boolean(p.badges?.isNew),
@@ -341,13 +345,20 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    if (categoryParam) {
-      const slugs = categoryParam.split(",").map((s) => s.trim().toLowerCase());
+    if (resolvedCategorySlugs.length > 0) {
       filtered = filtered.filter((p) => {
-        const catSlug = (p.category as any)?.slug?.toLowerCase() || "";
-        const catName = (p.category as any)?.name?.toLowerCase() || "";
-        return slugs.some((s) => catSlug.includes(s) || catName.includes(s));
+        const catSlug = p.categorySlug.toLowerCase();
+        const catName = typeof p.category === "string" ? normalizeVietnamese(p.category) : "";
+        return resolvedCategorySlugs.some((s) => catSlug === s || catSlug.includes(s) || catName.includes(s));
       });
+    }
+
+    if (isCategoryNew) {
+      filtered = filtered.filter((p) => p.badges.isNew);
+    }
+
+    if (isCategorySale) {
+      filtered = filtered.filter((p) => (p.compareAtPrice || 0) > p.basePrice);
     }
 
     if (query) {
