@@ -4,7 +4,7 @@ import { ALL_PRODUCTS } from "@/lib/products-data";
 
 export const dynamic = "force-dynamic";
 
-function withTimeout<T>(promise: Promise<T>, ms: number = 800): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number = 2500): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
       },
       take: 20,
     }),
-    800
+    2500
   );
 
     // Tính điểm liên quan (Relevance Scoring)
