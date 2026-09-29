@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { getProductBySlug, ALL_PRODUCTS } from "@/lib/products-data";
 
 export const dynamic = "force-dynamic";
+
+function withTimeout<T>(promise: Promise<T>, ms: number = 800): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`DB_TIMEOUT_${ms}MS`)), ms)
+    ),
+  ]);
+}
 
 export async function GET(
   request: NextRequest,
@@ -14,8 +24,9 @@ export async function GET(
       return NextResponse.json({ error: "Slug is required" }, { status: 400 });
     }
 
-    const product = await prisma.product.findUnique({
-      where: { slug },
+    const product = await withTimeout(
+      prisma.product.findUnique({
+        where: { slug },
       include: {
         images: {
           orderBy: { order: "asc" },
@@ -52,7 +63,9 @@ export async function GET(
           },
         },
       },
-    });
+    }),
+    800
+  );
 
     if (!product) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
@@ -173,9 +186,18 @@ export async function GET(
       relatedProducts: formattedRelated,
     };
 
-    return NextResponse.json(responseData);
   } catch (error: any) {
-    console.error("[API_PRODUCT_SLUG_ERROR]", error.message);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    console.warn("[API_PRODUCT_SLUG_FALLBACK]", error.message);
+    const fallback = getProductBySlug(params.slug);
+    if (fallback) {
+      return NextResponse.json(fallback, {
+        status: 200,
+        headers: {
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+          "X-Data-Source": "mock-fallback",
+        },
+      });
+    }
+    return NextResponse.json({ error: "Product not found" }, { status: 404 });
   }
 }

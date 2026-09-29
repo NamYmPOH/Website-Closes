@@ -3,9 +3,14 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { getProductBySlug, ALL_PRODUCTS } from "@/lib/products-data";
 import { useCartStore } from "@/stores/cartStore";
 import ProductCard from "@/components/storefront/ProductCard";
+import { formatCurrency } from "@/lib/utils/format";
+import { QuantityStepper } from "@/components/ui/QuantityStepper";
+import { Badge } from "@/components/ui/Badge";
+import { ProductItem } from "@/types/product";
 import {
   Star,
   ShieldCheck,
@@ -30,7 +35,7 @@ export default function ProductDetailPage({
   const router = useRouter();
   const { addItem, toggleWishlist, isInWishlist } = useCartStore();
 
-  const [product, setProduct] = useState<any>(null);
+  const [product, setProduct] = useState<ProductItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedImage, setSelectedImage] = useState<string>("");
   const [selectedColor, setSelectedColor] = useState<string>("");
@@ -115,10 +120,10 @@ export default function ProductDetailPage({
   // Tìm biến thể tương ứng theo Color và Size
   const currentVariant =
     (product.variants || []).find(
-      (v: any) => v.color === selectedColor && v.size === selectedSize
+      (v) => v.color === selectedColor && v.size === selectedSize
     ) || product.variants?.[0];
 
-  const currentPrice = currentVariant ? currentVariant.price : product.basePrice;
+  const currentPrice = currentVariant?.price ?? product.basePrice;
   const currentComparePrice = currentVariant ? currentVariant.compareAtPrice : product.compareAtPrice;
   const actualStock = currentVariant ? (currentVariant.stock ?? currentVariant.stockQuantity ?? product.stockQuantity ?? 10) : (product.stockQuantity ?? 10);
   const reservedStock = currentVariant ? (currentVariant.reservedQuantity ?? 0) : (product.reservedQuantity ?? 0);
@@ -128,10 +133,10 @@ export default function ProductDetailPage({
   const isLowStock = !isOutOfStock && currentStock <= reorderThreshold;
 
   const availableColors: string[] = Array.from(
-    new Set((product.variants || []).map((v: any) => v.color).filter(Boolean))
+    new Set((product.variants || []).map((v) => v.color).filter((c): c is string => Boolean(c)))
   );
   const availableSizes: string[] = Array.from(
-    new Set((product.variants || []).map((v: any) => v.size).filter(Boolean))
+    new Set((product.variants || []).map((v) => v.size).filter((s): s is string => Boolean(s)))
   );
 
   const isLiked = isInWishlist(product.id);
@@ -201,6 +206,20 @@ export default function ProductDetailPage({
 
   const relatedProducts = product.relatedProducts || ALL_PRODUCTS.slice(0, 4);
 
+  const categoryName =
+    typeof product.category === "object" && product.category !== null
+      ? product.category.name
+      : typeof product.category === "string"
+      ? product.category
+      : "Sản phẩm";
+
+  const brandName =
+    typeof product.brand === "object" && product.brand !== null
+      ? product.brand.name
+      : typeof product.brand === "string"
+      ? product.brand
+      : "AURA STUDIO";
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       {/* Breadcrumb */}
@@ -213,7 +232,7 @@ export default function ProductDetailPage({
           href={`/products?category=${product.categorySlug || ""}`}
           className="hover:text-foreground transition"
         >
-          {product.category || "Sản phẩm"}
+          {categoryName}
         </Link>
         <span>/</span>
         <span className="text-foreground font-medium truncate">{product.title}</span>
@@ -229,27 +248,32 @@ export default function ProductDetailPage({
               <button
                 key={index}
                 onClick={() => setSelectedImage(img)}
-                className={`relative w-20 h-24 rounded-md overflow-hidden border-2 transition flex-shrink-0 cursor-pointer ${
+                className={`relative w-20 h-24 rounded-md overflow-hidden border-2 transition shrink-0 cursor-pointer ${
                   selectedImage === img
                     ? "border-foreground"
                     : "border-transparent opacity-70 hover:opacity-100"
                 }`}
               >
-                <img
+                <Image
                   src={img}
                   alt={`${product.title} view ${index + 1}`}
-                  className="w-full h-full object-cover"
+                  fill
+                  sizes="80px"
+                  className="object-cover"
                 />
               </button>
             ))}
           </div>
 
           {/* Main Display Image */}
-          <div className="relative flex-1 aspect-[3/4] bg-neutral-100 rounded-lg overflow-hidden group">
-            <img
+          <div className="relative flex-1 aspect-[3/4] bg-neutral-100 dark:bg-neutral-800 rounded-lg overflow-hidden group">
+            <Image
               src={selectedImage || product.primaryImage}
               alt={product.title}
-              className={`w-full h-full object-cover object-center ${
+              fill
+              priority
+              sizes="(max-width: 1024px) 100vw, 50vw"
+              className={`object-cover object-center ${
                 isOutOfStock ? "grayscale opacity-80" : ""
               }`}
             />
@@ -257,17 +281,17 @@ export default function ProductDetailPage({
             {/* Badges */}
             <div className="absolute top-4 left-4 flex flex-col gap-1.5">
               {isOutOfStock ? (
-                <span className="px-2.5 py-1 text-xs font-semibold uppercase tracking-wider bg-neutral-900 text-white rounded">
+                <Badge variant="default" className="bg-neutral-900 text-white shadow-xs">
                   Hết hàng
-                </span>
+                </Badge>
               ) : product.badges?.discountPercent ? (
-                <span className="px-2.5 py-1 text-xs font-semibold uppercase tracking-wider bg-red-600 text-white rounded">
+                <Badge variant="danger" className="shadow-xs">
                   -{product.badges.discountPercent}%
-                </span>
+                </Badge>
               ) : product.badges?.isNew ? (
-                <span className="px-2.5 py-1 text-xs font-semibold uppercase tracking-wider bg-foreground text-background rounded">
+                <Badge variant="default" className="shadow-xs">
                   Mới
-                </span>
+                </Badge>
               ) : null}
             </div>
           </div>
@@ -278,7 +302,7 @@ export default function ProductDetailPage({
           <div>
             <div className="flex items-center justify-between">
               <span className="text-xs uppercase tracking-widest text-muted font-semibold">
-                {product.brand || "AURA STUDIO"}
+                {brandName}
               </span>
               <button
                 onClick={() => toggleWishlist(product)}
@@ -321,17 +345,11 @@ export default function ProductDetailPage({
             {/* Price */}
             <div className="mt-4 flex items-baseline gap-3">
               <span className="text-2xl font-bold text-foreground">
-                {new Intl.NumberFormat("vi-VN", {
-                  style: "currency",
-                  currency: "VND",
-                }).format(currentPrice)}
+                {formatCurrency(currentPrice)}
               </span>
               {currentComparePrice && (
                 <span className="text-sm text-muted line-through">
-                  {new Intl.NumberFormat("vi-VN", {
-                    style: "currency",
-                    currency: "VND",
-                  }).format(currentComparePrice)}
+                  {formatCurrency(currentComparePrice)}
                 </span>
               )}
             </div>
@@ -416,25 +434,13 @@ export default function ProductDetailPage({
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="flex items-center border border-border rounded-md">
-                <button
-                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                  disabled={isOutOfStock}
-                  className="p-2.5 text-muted hover:text-foreground disabled:opacity-40"
-                  aria-label="Giảm số lượng"
-                >
-                  <Minus size={14} />
-                </button>
-                <span className="px-4 text-xs font-bold text-foreground">{quantity}</span>
-                <button
-                  onClick={() => setQuantity((q) => Math.min(currentStock, q + 1))}
-                  disabled={isOutOfStock || quantity >= currentStock}
-                  className="p-2.5 text-muted hover:text-foreground disabled:opacity-40"
-                  aria-label="Tăng số lượng"
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
+              <QuantityStepper
+                value={quantity}
+                min={1}
+                max={currentStock}
+                onChange={setQuantity}
+                disabled={isOutOfStock}
+              />
 
               {/* Add to cart */}
               <button

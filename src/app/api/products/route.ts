@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { getOrSetCache } from "@/lib/redis";
 import { Prisma } from "@prisma/client";
+import { ALL_PRODUCTS } from "@/lib/products-data";
+
+function withTimeout<T>(promise: Promise<T>, ms: number = 800): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`DB_TIMEOUT_${ms}MS`)), ms)
+    ),
+  ]);
+}
 
 export const dynamic = "force-dynamic";
 
@@ -94,10 +104,11 @@ export async function GET(request: NextRequest) {
       sortBy,
     })}`;
 
-    // 3. Thực thi truy vấn với Cache
-    const result = await getOrSetCache(
-      cacheKey,
-      async () => {
+    // 3. Thực thi truy vấn với Cache & Timeout 800ms
+    const result = await withTimeout(
+      getOrSetCache(
+        cacheKey,
+        async () => {
         const whereClause: Prisma.ProductWhereInput = {
           status: "PUBLISHED",
         };
@@ -283,7 +294,9 @@ export async function GET(request: NextRequest) {
         };
       },
       60 // 1 phút caching
-    );
+    ),
+    800 // Timeout 800ms nếu DB offline
+  );
 
     return NextResponse.json(result, {
       status: 200,
@@ -293,21 +306,96 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error("[API_PRODUCTS_ERROR]", error.message);
+    console.warn("[API_PRODUCTS_FALLBACK]", error.message);
+
+    // Cơ chế Fallback siêu tốc: Sử dụng ALL_PRODUCTS khi DB Supabase offline/timeout
+    const { searchParams } = new URL(request.url);
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
+    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") || "16", 10)));
+    const query = searchParams.get("q")?.trim() || "";
+    const categoryParam = searchParams.get("category");
+    const minPrice = searchParams.get("minPrice") ? parseFloat(searchParams.get("minPrice")!) : undefined;
+    const maxPrice = searchParams.get("maxPrice") ? parseFloat(searchParams.get("maxPrice")!) : undefined;
+    const inStockOnly = searchParams.get("inStock") === "true";
+    const sortBy = searchParams.get("sortBy") || "newest";
+
+    let filtered = ALL_PRODUCTS.map((p) => {
+      const isOutOfStock = Boolean(p.badges?.isOutOfStock);
+      return {
+        id: p.id,
+        title: p.title,
+        slug: p.slug,
+        basePrice: p.basePrice,
+        compareAtPrice: p.compareAtPrice,
+        primaryImage: p.primaryImage,
+        brand: typeof p.brand === "string" ? { id: p.brand, name: p.brand, slug: p.brand } : p.brand,
+        category: typeof p.category === "string" ? { id: p.categorySlug || p.category, name: p.category, slug: p.categorySlug || p.category } : p.category,
+        badges: {
+          isOutOfStock,
+          isNew: Boolean(p.badges?.isNew),
+          discountPercent: p.badges?.discountPercent || 0,
+        },
+        averageRating: p.averageRating || 5,
+        reviewCount: p.reviewCount || 0,
+        stockQuantity: 20,
+      };
+    });
+
+    if (categoryParam) {
+      const slugs = categoryParam.split(",").map((s) => s.trim().toLowerCase());
+      filtered = filtered.filter((p) => {
+        const catSlug = (p.category as any)?.slug?.toLowerCase() || "";
+        const catName = (p.category as any)?.name?.toLowerCase() || "";
+        return slugs.some((s) => catSlug.includes(s) || catName.includes(s));
+      });
+    }
+
+    if (query) {
+      const normQ = normalizeVietnamese(query);
+      filtered = filtered.filter((p) => normalizeVietnamese(p.title).includes(normQ));
+    }
+
+    if (minPrice !== undefined) {
+      filtered = filtered.filter((p) => p.basePrice >= minPrice);
+    }
+    if (maxPrice !== undefined) {
+      filtered = filtered.filter((p) => p.basePrice <= maxPrice);
+    }
+    if (inStockOnly) {
+      filtered = filtered.filter((p) => !p.badges.isOutOfStock);
+    }
+
+    if (sortBy === "price-asc") {
+      filtered.sort((a, b) => a.basePrice - b.basePrice);
+    } else if (sortBy === "price-desc") {
+      filtered.sort((a, b) => b.basePrice - a.basePrice);
+    } else if (sortBy === "bestselling" || sortBy === "rating") {
+      filtered.sort((a, b) => (b.averageRating || 5) - (a.averageRating || 5));
+    }
+
+    const totalCount = filtered.length;
+    const startIndex = (page - 1) * limit;
+    const paginatedItems = filtered.slice(startIndex, startIndex + limit);
+
     return NextResponse.json(
       {
-        items: [],
+        items: paginatedItems,
         pagination: {
-          page: 1,
-          limit: 16,
-          totalCount: 0,
-          totalPages: 0,
-          hasNextPage: false,
-          hasPrevPage: false,
+          page,
+          limit,
+          totalCount,
+          totalPages: Math.ceil(totalCount / limit) || 1,
+          hasNextPage: page * limit < totalCount,
+          hasPrevPage: page > 1,
         },
-        error: "Không thể truy vấn dữ liệu sản phẩm.",
       },
-      { status: 500 }
+      {
+        status: 200,
+        headers: {
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+          "X-Data-Source": "mock-fallback",
+        },
+      }
     );
   }
 }

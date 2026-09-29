@@ -20,6 +20,108 @@ import {
 import { useRecentLogins } from "@/hooks/useRecentLogins";
 import RecentLoginAccounts from "@/components/auth/RecentLoginAccounts";
 
+interface SavedCredentialItem {
+  email: string;
+  password: string; // Base64 encoded
+  savedAt: string;
+}
+
+interface SavedVault {
+  accounts: Record<string, SavedCredentialItem>;
+  lastActiveEmail?: string;
+}
+
+const VAULT_STORAGE_KEY = "aura_saved_passwords_vault";
+const LEGACY_STORAGE_KEY = "aura_remembered_credentials";
+
+function readPasswordVault(): SavedVault {
+  if (typeof window === "undefined") return { accounts: {} };
+
+  try {
+    const raw = localStorage.getItem(VAULT_STORAGE_KEY);
+    let vault: SavedVault = { accounts: {} };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.accounts === "object") {
+        vault = parsed;
+      }
+    }
+
+    // Tương thích ngược: Nếu có dữ liệu cũ ở aura_remembered_credentials mà chưa có trong vault
+    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacyRaw) {
+      try {
+        const legacyParsed = JSON.parse(legacyRaw);
+        if (legacyParsed?.email && legacyParsed?.password) {
+          const normLegacyEmail = legacyParsed.email.trim().toLowerCase();
+          if (!vault.accounts[normLegacyEmail]) {
+            vault.accounts[normLegacyEmail] = {
+              email: legacyParsed.email.trim(),
+              password: legacyParsed.password,
+              savedAt: legacyParsed.savedAt || new Date().toISOString(),
+            };
+            if (!vault.lastActiveEmail) {
+              vault.lastActiveEmail = legacyParsed.email.trim();
+            }
+            localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(vault));
+          }
+        }
+      } catch (e) {
+        console.warn("Legacy credentials migration error:", e);
+      }
+    }
+
+    return vault;
+  } catch (err) {
+    console.warn("Failed to read password vault from localStorage:", err);
+    return { accounts: {} };
+  }
+}
+
+function saveCredentialToVault(email: string, rawPassword: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const vault = readPasswordVault();
+    const normalized = email.trim().toLowerCase();
+    vault.accounts[normalized] = {
+      email: email.trim(),
+      password: btoa(rawPassword),
+      savedAt: new Date().toISOString(),
+    };
+    vault.lastActiveEmail = email.trim();
+    localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(vault));
+  } catch (err) {
+    console.warn("Failed to save credentials to vault:", err);
+  }
+}
+
+function removeCredentialFromVault(email: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const vault = readPasswordVault();
+    const normalized = email.trim().toLowerCase();
+    if (vault.accounts[normalized]) {
+      delete vault.accounts[normalized];
+      if (vault.lastActiveEmail?.toLowerCase() === normalized) {
+        const remainingKeys = Object.keys(vault.accounts);
+        vault.lastActiveEmail =
+          remainingKeys.length > 0 ? vault.accounts[remainingKeys[0]].email : undefined;
+      }
+      localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(vault));
+    }
+  } catch (err) {
+    console.warn("Failed to remove credentials from vault:", err);
+  }
+}
+
+function decodePassword(encodedPassword: string): string {
+  try {
+    return atob(encodedPassword);
+  } catch {
+    return encodedPassword;
+  }
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -35,6 +137,7 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberPassword, setRememberPassword] = useState(false);
+  const [savedAccountEmails, setSavedAccountEmails] = useState<string[]>([]);
   const [is2FARequired, setIs2FARequired] = useState(false);
   const [twoFactorCode, setTwoFactorCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -47,21 +150,25 @@ function LoginForm() {
       : ""
   );
 
-  // Tự động đọc và điền thông tin đăng nhập đã được ghi nhớ từ localStorage
+  // Tự động đọc và điền thông tin đăng nhập đã được ghi nhớ từ Vault
   useEffect(() => {
     try {
-      const savedAuth = localStorage.getItem("aura_remembered_credentials");
-      if (savedAuth) {
-        const parsed = JSON.parse(savedAuth);
-        if (parsed?.email && parsed?.password) {
-          setEmail(parsed.email);
-          try {
-            setPassword(atob(parsed.password));
-          } catch {
-            setPassword(parsed.password);
-          }
-          setRememberPassword(true);
-        }
+      const vault = readPasswordVault();
+      const keys = Object.keys(vault.accounts);
+      setSavedAccountEmails(keys);
+
+      // Nếu có tài khoản vừa hoạt động gần nhất
+      const targetEmail = vault.lastActiveEmail?.toLowerCase();
+      if (targetEmail && vault.accounts[targetEmail]) {
+        const item = vault.accounts[targetEmail];
+        setEmail(item.email);
+        setPassword(decodePassword(item.password));
+        setRememberPassword(true);
+      } else if (keys.length > 0) {
+        const first = vault.accounts[keys[0]];
+        setEmail(first.email);
+        setPassword(decodePassword(first.password));
+        setRememberPassword(true);
       }
     } catch (err) {
       console.warn("Could not read remembered credentials:", err);
@@ -121,31 +228,65 @@ function LoginForm() {
     );
   }
 
+  // Tự động tìm mật khẩu tương ứng khi chọn tài khoản gần đây
   const handleSelectRecentAccount = (selectedEmail: string) => {
     setEmail(selectedEmail);
     setErrorMessage("");
 
     try {
-      const savedAuth = localStorage.getItem("aura_remembered_credentials");
-      if (savedAuth) {
-        const parsed = JSON.parse(savedAuth);
-        if (parsed?.email?.toLowerCase() === selectedEmail.toLowerCase() && parsed?.password) {
-          try {
-            setPassword(atob(parsed.password));
-          } catch {
-            setPassword(parsed.password);
-          }
-          setRememberPassword(true);
-          return;
-        }
+      const vault = readPasswordVault();
+      const normalized = selectedEmail.trim().toLowerCase();
+      const savedItem = vault.accounts[normalized];
+
+      if (savedItem) {
+        setPassword(decodePassword(savedItem.password));
+        setRememberPassword(true);
+        return;
       }
     } catch (err) {
       console.warn("Could not check remembered password for selected account:", err);
     }
 
+    setPassword("");
+    setRememberPassword(false);
     setTimeout(() => {
       passwordInputRef.current?.focus();
     }, 100);
+  };
+
+  // Tự động nhận diện mật khẩu khi gõ hoặc sửa Email
+  const handleEmailChange = (newEmail: string) => {
+    setEmail(newEmail);
+    setErrorMessage("");
+
+    try {
+      const vault = readPasswordVault();
+      const normalized = newEmail.trim().toLowerCase();
+      const savedItem = vault.accounts[normalized];
+
+      if (savedItem) {
+        setPassword(decodePassword(savedItem.password));
+        setRememberPassword(true);
+      } else {
+        setRememberPassword(false);
+      }
+    } catch (err) {
+      console.warn("Error looking up password on email change:", err);
+    }
+  };
+
+  // Xóa tài khoản khỏi cả Recent Logins và Vault
+  const handleRemoveRecentAccount = (accountEmail: string) => {
+    removeLogin(accountEmail);
+    removeCredentialFromVault(accountEmail);
+    const normalized = accountEmail.trim().toLowerCase();
+    setSavedAccountEmails((prev) => prev.filter((e) => e.toLowerCase() !== normalized));
+
+    if (email.trim().toLowerCase() === normalized) {
+      setEmail("");
+      setPassword("");
+      setRememberPassword(false);
+    }
   };
 
   const handleUseOtherAccount = () => {
@@ -184,34 +325,37 @@ function LoginForm() {
         return;
       }
 
-      // Xử lý Ghi nhớ mật khẩu (Tuyệt đối không tự động lưu mật khẩu Admin)
-      if (rememberPassword && !email.toLowerCase().includes("admin")) {
-        try {
-          localStorage.setItem(
-            "aura_remembered_credentials",
-            JSON.stringify({
-              email: email.trim(),
-              password: btoa(password),
-              savedAt: new Date().toISOString(),
-            })
-          );
-        } catch (e) {
-          console.warn("Failed to save credentials to localStorage:", e);
-        }
+      // Xử lý Ghi nhớ mật khẩu riêng biệt cho từng tài khoản (User, Staff, Admin)
+      const normalizedEmail = email.trim().toLowerCase();
+      if (rememberPassword) {
+        saveCredentialToVault(email.trim(), password);
+        setSavedAccountEmails((prev) =>
+          prev.includes(normalizedEmail) ? prev : [...prev, normalizedEmail]
+        );
       } else {
-        try {
-          localStorage.removeItem("aura_remembered_credentials");
-        } catch (e) {
-          console.warn("Failed to remove credentials from localStorage:", e);
-        }
+        removeCredentialFromVault(normalizedEmail);
+        setSavedAccountEmails((prev) => prev.filter((e) => e.toLowerCase() !== normalizedEmail));
       }
 
-      // Lưu vào recent logins (tối đa 2, tuyệt đối loại trừ admin)
-      if (!email.toLowerCase().includes("admin")) {
+      // Xác định thông tin vai trò để lưu vào Recent Logins
+      let role = "CUSTOMER";
+      let displayName = email.split("@")[0];
+
+      if (normalizedEmail.includes("staff") || normalizedEmail === "staff@aurastudio.com") {
+        role = "STAFF";
+        displayName = "Lê Hoàng (Staff)";
+      } else if (normalizedEmail === "nguyenvanan@example.com") {
+        displayName = "Nguyễn Văn An";
+      } else if (normalizedEmail === "tranmai@example.com") {
+        displayName = "Trần Thị Mai";
+      }
+
+      // Lưu vào recent logins (loại trừ Admin)
+      if (!normalizedEmail.includes("admin")) {
         saveLogin({
           email: email.trim(),
-          name: email.split("@")[0],
-          role: "CUSTOMER",
+          name: displayName,
+          role,
         });
       }
 
@@ -219,7 +363,7 @@ function LoginForm() {
 
       // Tự động điều hướng sau khi phiên được thiết lập
       setTimeout(() => {
-        if (email.toLowerCase().includes("admin")) {
+        if (normalizedEmail.includes("admin")) {
           router.push("/admin");
         } else {
           router.push(callbackUrl);
@@ -275,12 +419,13 @@ function LoginForm() {
         </div>
       )}
 
-      {/* Danh sách tối đa 2 tài khoản gần đây (Lấy từ localStorage, loại trừ Admin) */}
+      {/* Danh sách tài khoản gần đây (Lấy từ localStorage, loại trừ Admin) */}
       <RecentLoginAccounts
         accounts={recentLogins}
         selectedEmail={email}
+        savedEmails={savedAccountEmails}
         onSelectAccount={handleSelectRecentAccount}
-        onRemoveAccount={removeLogin}
+        onRemoveAccount={handleRemoveRecentAccount}
         onUseOtherAccount={handleUseOtherAccount}
       />
 
@@ -290,28 +435,78 @@ function LoginForm() {
           <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800 dark:text-amber-300">
             <UserCheck size={14} /> Chế độ DEV: Tài khoản kiểm thử nhanh
           </div>
-          <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             <button
               type="button"
               onClick={() => {
-                setEmail("nguyenvanan@example.com");
-                setPassword("UserPassword@123");
+                const targetEmail = "nguyenvanan@example.com";
+                setEmail(targetEmail);
+                const vault = readPasswordVault();
+                const saved = vault.accounts[targetEmail];
+                setPassword(saved ? decodePassword(saved.password) : "UserPassword@123");
+                setRememberPassword(true);
               }}
-              className="p-2 border rounded bg-background text-left"
+              className="p-2 border rounded bg-background text-left hover:border-foreground/50 transition cursor-pointer"
             >
-              <span className="font-bold block text-[11px]">User VIP (An)</span>
+              <div className="flex items-center justify-between">
+                <span className="font-bold block text-[11px]">User VIP (An)</span>
+                <span className="text-[9px] px-1 bg-neutral-200 dark:bg-neutral-800 rounded">User</span>
+              </div>
               <span className="text-[10px] text-muted truncate">nguyenvanan@...</span>
             </button>
             <button
               type="button"
               onClick={() => {
-                setEmail("tranmai@example.com");
-                setPassword("UserPassword@123");
+                const targetEmail = "staff@aurastudio.com";
+                setEmail(targetEmail);
+                const vault = readPasswordVault();
+                const saved = vault.accounts[targetEmail];
+                setPassword(saved ? decodePassword(saved.password) : "StaffPassword@123");
+                setRememberPassword(true);
               }}
-              className="p-2 border rounded bg-background text-left"
+              className="p-2 border rounded bg-background text-left hover:border-blue-500/50 transition cursor-pointer"
             >
-              <span className="font-bold block text-[11px]">User Mua sắm (Mai)</span>
+              <div className="flex items-center justify-between">
+                <span className="font-bold block text-[11px] text-blue-600 dark:text-blue-400">Staff (Hoàng)</span>
+                <span className="text-[9px] px-1 bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded font-semibold">Staff</span>
+              </div>
+              <span className="text-[10px] text-muted truncate">staff@aurastudio...</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const targetEmail = "tranmai@example.com";
+                setEmail(targetEmail);
+                const vault = readPasswordVault();
+                const saved = vault.accounts[targetEmail];
+                setPassword(saved ? decodePassword(saved.password) : "UserPassword@123");
+                setRememberPassword(true);
+              }}
+              className="p-2 border rounded bg-background text-left hover:border-foreground/50 transition cursor-pointer"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold block text-[11px]">User Mai</span>
+                <span className="text-[9px] px-1 bg-neutral-200 dark:bg-neutral-800 rounded">User</span>
+              </div>
               <span className="text-[10px] text-muted truncate">tranmai@...</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const targetEmail = "admin@aurastudio.com";
+                setEmail(targetEmail);
+                const vault = readPasswordVault();
+                const saved = vault.accounts[targetEmail];
+                setPassword(saved ? decodePassword(saved.password) : "AdminPassword@123");
+                setRememberPassword(true);
+              }}
+              className="p-2 border rounded bg-background text-left hover:border-purple-500/50 transition cursor-pointer"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold block text-[11px] text-purple-600 dark:text-purple-400">Admin Quản trị</span>
+                <span className="text-[9px] px-1 bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 rounded font-semibold">Admin</span>
+              </div>
+              <span className="text-[10px] text-muted truncate">admin@aurastudio...</span>
             </button>
           </div>
         </div>
@@ -331,7 +526,7 @@ function LoginForm() {
             required
             placeholder="name@example.com"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => handleEmailChange(e.target.value)}
             className="w-full px-3.5 py-2.5 border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-foreground transition"
           />
         </div>

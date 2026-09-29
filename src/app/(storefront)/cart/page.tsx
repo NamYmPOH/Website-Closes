@@ -2,10 +2,17 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useCartStore } from "@/stores/cartStore";
-import { Trash2, Plus, Minus, ArrowRight, ShieldCheck, Tag } from "lucide-react";
+import { Trash2, ArrowRight, ShieldCheck, Tag, ShoppingBag } from "lucide-react";
+import { formatCurrency } from "@/lib/utils/format";
+import { QuantityStepper } from "@/components/ui/QuantityStepper";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { Button } from "@/components/ui/Button";
 
 export default function CartPage() {
+  const router = useRouter();
   const {
     items,
     updateQuantity,
@@ -21,7 +28,10 @@ export default function CartPage() {
   } = useCartStore();
 
   const [inputCode, setInputCode] = useState("");
-  const [couponFeedback, setCouponFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const [couponFeedback, setCouponFeedback] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
 
   const subtotal = getSubtotal();
   const discount = getDiscountAmount();
@@ -35,70 +45,69 @@ export default function CartPage() {
     setCouponFeedback(res);
   };
 
+  const totalQuantity = items.reduce((acc, i) => acc + i.quantity, 0);
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <h1 className="text-2xl sm:text-3xl font-bold uppercase tracking-tight mb-8">
-        Giỏ hàng của bạn ({items.reduce((acc, i) => acc + i.quantity, 0)})
+      <h1 className="text-2xl sm:text-3xl font-bold uppercase tracking-tight mb-8 text-foreground">
+        Giỏ hàng của bạn ({totalQuantity})
       </h1>
 
       {items.length === 0 ? (
-        <div className="text-center py-24 border border-dashed border-border rounded-lg space-y-4">
-          <p className="text-muted text-sm">Giỏ hàng của bạn đang trống.</p>
-          <Link
-            href="/products"
-            className="inline-flex items-center gap-2 px-6 py-3 bg-foreground text-background text-xs font-semibold uppercase tracking-wider rounded-md hover:opacity-90 transition"
-          >
-            Bắt đầu mua sắm ngay <ArrowRight size={14} />
-          </Link>
-        </div>
+        <EmptyState
+          icon={ShoppingBag}
+          title="Giỏ hàng của bạn đang trống"
+          description="Chưa có món hàng nào được thêm vào giỏ. Hãy tham khảo các sản phẩm mới nhất để chọn cho mình thiết kế ưng ý."
+          actionLabel="Bắt đầu mua sắm ngay"
+          onAction={() => router.push("/products")}
+        />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
           {/* Items List */}
           <div className="lg:col-span-2 space-y-6">
             <div className="divide-y divide-border border-y border-border">
               {items.map((item) => (
-                <div key={item.product.id} className="py-6 flex gap-6 items-center">
-                  <img
-                    src={item.product.primaryImage}
-                    alt={item.product.title}
-                    className="w-20 h-28 object-cover rounded bg-neutral-100"
-                  />
+                <div
+                  key={item.product.id}
+                  className="py-6 flex gap-6 items-center"
+                >
+                  <div className="relative w-20 h-28 rounded-lg overflow-hidden bg-neutral-100 dark:bg-neutral-800 shrink-0 border border-border/40">
+                    <Image
+                      src={item.product.primaryImage}
+                      alt={item.product.title}
+                      fill
+                      sizes="80px"
+                      className="object-cover"
+                    />
+                  </div>
+
                   <div className="flex-1 min-w-0">
                     <Link
                       href={`/products/${item.product.slug}`}
-                      className="text-sm font-semibold hover:underline truncate block"
+                      className="text-sm font-semibold hover:underline truncate block text-foreground"
                     >
                       {item.product.title}
                     </Link>
                     <p className="text-xs text-muted mt-0.5">
-                      Đơn giá:{" "}
-                      {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(
-                        item.product.basePrice
-                      )}
+                      Đơn giá: {formatCurrency(item.product.basePrice)}
                     </p>
 
                     <div className="flex items-center gap-4 mt-4">
-                      {/* Quantity Controls */}
-                      <div className="flex items-center border border-border rounded">
-                        <button
-                          onClick={() => updateQuantity(item.product.id, item.quantity - 1)}
-                          className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
-                        >
-                          <Minus size={13} />
-                        </button>
-                        <span className="px-3 text-xs font-semibold">{item.quantity}</span>
-                        <button
-                          onClick={() => updateQuantity(item.product.id, item.quantity + 1)}
-                          className="p-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition"
-                        >
-                          <Plus size={13} />
-                        </button>
-                      </div>
+                      {/* Quantity Stepper */}
+                      <QuantityStepper
+                        value={item.quantity}
+                        min={1}
+                        size="sm"
+                        onChange={(newQty) =>
+                          updateQuantity(item.product.id, newQty)
+                        }
+                      />
 
                       {/* Remove Button */}
                       <button
                         onClick={() => removeItem(item.product.id)}
-                        className="text-xs text-muted hover:text-red-500 flex items-center gap-1 transition"
+                        className="text-xs text-muted hover:text-red-500 flex items-center gap-1 transition cursor-pointer"
+                        aria-label={`Xóa ${item.product.title} khỏi giỏ`}
                       >
                         <Trash2 size={14} /> Xóa
                       </button>
@@ -107,10 +116,8 @@ export default function CartPage() {
 
                   {/* Line Total */}
                   <div className="text-right">
-                    <span className="text-sm font-bold">
-                      {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(
-                        item.product.basePrice * item.quantity
-                      )}
+                    <span className="text-sm font-bold text-foreground">
+                      {formatCurrency(item.product.basePrice * item.quantity)}
                     </span>
                   </div>
                 </div>
@@ -118,12 +125,15 @@ export default function CartPage() {
             </div>
 
             <div className="flex justify-between items-center pt-2">
-              <Link href="/products" className="text-xs font-medium text-muted hover:text-foreground">
+              <Link
+                href="/products"
+                className="text-xs font-medium text-muted hover:text-foreground transition"
+              >
                 ← Tiếp tục mua sắm
               </Link>
               <button
                 onClick={clearCart}
-                className="text-xs text-muted hover:text-red-500 underline"
+                className="text-xs text-muted hover:text-red-500 underline cursor-pointer transition"
               >
                 Xóa sạch giỏ hàng
               </button>
@@ -132,10 +142,12 @@ export default function CartPage() {
 
           {/* Order Summary & Coupon */}
           <div className="lg:col-span-1 space-y-6">
-            <div className="p-6 border border-border rounded-lg bg-neutral-50/50 dark:bg-neutral-900/30 space-y-6">
-              <h2 className="text-sm font-bold uppercase tracking-wider">Tóm tắt đơn hàng</h2>
+            <div className="p-6 border border-border rounded-xl bg-neutral-50/50 dark:bg-neutral-900/30 space-y-6 shadow-xs">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
+                Tóm tắt đơn hàng
+              </h2>
 
-              {/* Coupon Form (Tính năng 52) */}
+              {/* Coupon Form */}
               <div className="space-y-2">
                 <form onSubmit={handleApplyCoupon} className="flex gap-2">
                   <div className="relative flex-1">
@@ -144,22 +156,24 @@ export default function CartPage() {
                       placeholder="Mã giảm giá (ví dụ: AURA10)"
                       value={inputCode}
                       onChange={(e) => setInputCode(e.target.value)}
-                      className="w-full pl-8 pr-3 py-2 text-xs border border-border rounded-md bg-background focus:outline-none uppercase"
+                      className="w-full pl-8 pr-3 py-2 text-xs border border-border rounded-md bg-background focus:outline-none uppercase text-foreground placeholder:text-muted"
                     />
-                    <Tag size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+                    <Tag
+                      size={14}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
+                    />
                   </div>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-foreground text-background text-xs font-semibold rounded-md hover:opacity-90"
-                  >
+                  <Button type="submit" size="sm" variant="primary">
                     Áp dụng
-                  </button>
+                  </Button>
                 </form>
 
                 {couponFeedback && (
                   <p
                     className={`text-xs ${
-                      couponFeedback.success ? "text-green-600 font-medium" : "text-red-500"
+                      couponFeedback.success
+                        ? "text-emerald-600 font-medium"
+                        : "text-red-500"
                     }`}
                   >
                     {couponFeedback.message}
@@ -167,41 +181,44 @@ export default function CartPage() {
                 )}
 
                 {couponCode && (
-                  <div className="flex items-center justify-between text-xs bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 p-2 rounded">
-                    <span>Đang dùng mã: <strong>{couponCode}</strong></span>
-                    <button onClick={removeCoupon} className="underline text-[11px]">Gỡ bỏ</button>
+                  <div className="flex items-center justify-between text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 p-2 rounded border border-emerald-500/20">
+                    <span>
+                      Đang dùng mã: <strong>{couponCode}</strong>
+                    </span>
+                    <button
+                      onClick={removeCoupon}
+                      className="underline text-[11px] cursor-pointer"
+                    >
+                      Gỡ bỏ
+                    </button>
                   </div>
                 )}
               </div>
 
-              {/* Cost Calculations (Tính năng 51) */}
+              {/* Cost Calculations */}
               <div className="space-y-3 text-xs border-t border-border pt-4">
                 <div className="flex justify-between text-muted">
                   <span>Tạm tính</span>
                   <span className="text-foreground font-semibold">
-                    {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(subtotal)}
+                    {formatCurrency(subtotal)}
                   </span>
                 </div>
                 {discount > 0 && (
-                  <div className="flex justify-between text-green-600 font-medium">
+                  <div className="flex justify-between text-emerald-600 font-medium">
                     <span>Giảm giá khuyến mãi</span>
-                    <span>
-                      -{new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(discount)}
-                    </span>
+                    <span>-{formatCurrency(discount)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-muted">
                   <span>Phí vận chuyển</span>
                   <span>
-                    {shipping === 0
-                      ? "Miễn phí (Freeship)"
-                      : new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(shipping)}
+                    {shipping === 0 ? "Miễn phí (Freeship)" : formatCurrency(shipping)}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm font-bold border-t border-border pt-3">
-                  <span>Tổng thanh toán</span>
-                  <span className="text-base">
-                    {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(total)}
+                  <span className="text-foreground">Tổng thanh toán</span>
+                  <span className="text-base text-foreground">
+                    {formatCurrency(total)}
                   </span>
                 </div>
               </div>

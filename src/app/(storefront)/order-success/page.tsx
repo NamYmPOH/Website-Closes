@@ -3,6 +3,8 @@
 import React, { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
+import { formatCurrency } from "@/lib/utils/format";
 import {
   CheckCircle2,
   ArrowRight,
@@ -120,11 +122,15 @@ function OrderSuccessContent() {
               <div className="divide-y divide-border">
                 {order.items.map((item: any, idx: number) => (
                   <div key={idx} className="py-3.5 flex items-center gap-4">
-                    <img
-                      src={item.product?.primaryImage || "/placeholder-product.webp"}
-                      alt={item.product?.title}
-                      className="w-14 h-18 object-cover rounded bg-neutral-100 flex-shrink-0"
-                    />
+                    <div className="relative w-14 h-18 rounded bg-neutral-100 dark:bg-neutral-800 overflow-hidden shrink-0">
+                      <Image
+                        src={item.product?.primaryImage || "/placeholder-product.webp"}
+                        alt={item.product?.title || "Sản phẩm"}
+                        fill
+                        sizes="56px"
+                        className="object-cover"
+                      />
+                    </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="text-xs font-semibold text-foreground truncate">
                         {item.product?.title}
@@ -136,9 +142,7 @@ function OrderSuccessContent() {
                       </div>
                     </div>
                     <span className="text-xs font-bold text-foreground">
-                      {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(
-                        (item.product?.basePrice || 0) * item.quantity
-                      )}
+                      {formatCurrency((item.product?.basePrice || 0) * item.quantity)}
                     </span>
                   </div>
                 ))}
@@ -151,20 +155,12 @@ function OrderSuccessContent() {
             <div className="border-t border-border pt-4 space-y-2 text-xs">
               <div className="flex justify-between text-muted">
                 <span>Tạm tính</span>
-                <span>
-                  {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(
-                    order?.subtotal || 0
-                  )}
-                </span>
+                <span>{formatCurrency(order?.subtotal || 0)}</span>
               </div>
               {order?.discount > 0 && (
-                <div className="flex justify-between text-green-600 font-medium">
+                <div className="flex justify-between text-emerald-600 font-medium">
                   <span>Giảm giá voucher {order?.couponCode ? `(${order.couponCode})` : ""}</span>
-                  <span>
-                    -{new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(
-                      order.discount
-                    )}
-                  </span>
+                  <span>-{formatCurrency(order.discount)}</span>
                 </div>
               )}
               <div className="flex justify-between text-muted">
@@ -172,15 +168,13 @@ function OrderSuccessContent() {
                 <span>
                   {order?.shippingFee === 0
                     ? "Miễn phí"
-                    : `${new Intl.NumberFormat("vi-VN").format(order?.shippingFee || 0)}₫`}
+                    : formatCurrency(order?.shippingFee || 0)}
                 </span>
               </div>
               <div className="flex justify-between text-sm font-bold border-t border-border pt-3">
-                <span>Tổng tiền thanh toán</span>
-                <span className="text-base text-foreground">
-                  {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(
-                    order?.total || 0
-                  )}
+                <span className="text-foreground">Tổng tiền thanh toán</span>
+                <span className="text-base text-foreground font-bold">
+                  {formatCurrency(order?.total || 0)}
                 </span>
               </div>
             </div>

@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import { formatCurrency, formatNumber } from "@/lib/utils/format";
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import AddressAutocomplete, { AddressData } from "@/components/storefront/AddressAutocomplete";
@@ -408,7 +410,7 @@ export default function AccountPage() {
           <div className="bg-background px-3.5 py-2 rounded-lg border border-border text-center shadow-2xs">
             <span className="text-[10px] text-muted block uppercase font-medium">Điểm tích lũy</span>
             <span className="text-sm font-bold text-foreground">
-              {new Intl.NumberFormat("vi-VN").format(pointsData.availablePoints)} pts
+              {formatNumber(pointsData.availablePoints)} pts
             </span>
           </div>
         </div>
@@ -607,11 +609,15 @@ export default function AccountPage() {
                             <div key={item.id} className="flex items-center justify-between gap-3">
                               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                                 {item.productImage && (
-                                  <img
-                                    src={item.productImage}
-                                    alt={item.productTitle}
-                                    className="w-8 h-10 object-cover rounded bg-neutral-100 shrink-0"
-                                  />
+                                  <div className="relative w-8 h-10 rounded bg-neutral-100 dark:bg-neutral-800 overflow-hidden shrink-0">
+                                    <Image
+                                      src={item.productImage}
+                                      alt={item.productTitle}
+                                      fill
+                                      sizes="32px"
+                                      className="object-cover"
+                                    />
+                                  </div>
                                 )}
                                 <div className="min-w-0 flex-1">
                                   <p className="font-medium text-foreground truncate">
@@ -624,10 +630,7 @@ export default function AccountPage() {
                                 </div>
                               </div>
                               <span className="text-xs font-semibold text-foreground shrink-0">
-                                {new Intl.NumberFormat("vi-VN", {
-                                  style: "currency",
-                                  currency: "VND",
-                                }).format(item.totalPrice)}
+                                {formatCurrency(item.totalPrice)}
                               </span>
                             </div>
                           ))}
@@ -649,10 +652,7 @@ export default function AccountPage() {
                           <div className="flex items-center gap-1.5">
                             <span className="text-muted">Tổng cộng:</span>
                             <strong className="text-sm font-bold text-foreground">
-                              {new Intl.NumberFormat("vi-VN", {
-                                style: "currency",
-                                currency: "VND",
-                              }).format(order.totalAmount)}
+                              {formatCurrency(order.totalAmount)}
                             </strong>
                           </div>
                         </div>
@@ -691,7 +691,7 @@ export default function AccountPage() {
                 <div className="p-4 rounded-xl border border-border bg-neutral-50/50 dark:bg-neutral-900/50 space-y-1">
                   <span className="text-[10px] uppercase font-bold text-muted tracking-wider">Điểm khả dụng</span>
                   <div className="text-2xl font-bold text-foreground">
-                    {new Intl.NumberFormat("vi-VN").format(pointsData.availablePoints)}
+                    {formatNumber(pointsData.availablePoints)}
                   </div>
                   <p className="text-[11px] text-muted">Có thể dùng để đổi các mã giảm giá bên dưới</p>
                 </div>
@@ -699,7 +699,7 @@ export default function AccountPage() {
                 <div className="p-4 rounded-xl border border-border bg-neutral-50/50 dark:bg-neutral-900/50 space-y-1">
                   <span className="text-[10px] uppercase font-bold text-muted tracking-wider">Tổng tích lũy</span>
                   <div className="text-2xl font-bold text-foreground">
-                    {new Intl.NumberFormat("vi-VN").format(pointsData.totalPoints)}
+                    {formatNumber(pointsData.totalPoints)}
                   </div>
                   <p className="text-[11px] text-muted">Mỗi 1.000đ chi tiêu = 1 điểm thưởng</p>
                 </div>
@@ -707,7 +707,7 @@ export default function AccountPage() {
                 <div className="p-4 rounded-xl border border-border bg-neutral-50/50 dark:bg-neutral-900/50 space-y-1">
                   <span className="text-[10px] uppercase font-bold text-muted tracking-wider">Điểm đã tiêu</span>
                   <div className="text-2xl font-bold text-foreground">
-                    {new Intl.NumberFormat("vi-VN").format(pointsData.usedPoints)}
+                    {formatNumber(pointsData.usedPoints)}
                   </div>
                   <p className="text-[11px] text-muted">Điểm đã đổi sang voucher thành công</p>
                 </div>
@@ -808,7 +808,7 @@ export default function AccountPage() {
                             </span>
                           </div>
                           <p className="text-[11px] text-muted mt-0.5">
-                            Giảm: {v.discountType === "percent" ? `${v.discountValue}%` : `${new Intl.NumberFormat("vi-VN").format(v.discountValue)}₫`} • HSD: {v.expiryDate}
+                            Giảm: {v.discountType === "percent" ? `${v.discountValue}%` : formatCurrency(v.discountValue)} • HSD: {v.expiryDate}
                           </p>
                         </div>
 

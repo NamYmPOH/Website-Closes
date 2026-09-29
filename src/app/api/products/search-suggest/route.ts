@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { ALL_PRODUCTS } from "@/lib/products-data";
 
 export const dynamic = "force-dynamic";
+
+function withTimeout<T>(promise: Promise<T>, ms: number = 800): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`DB_TIMEOUT_${ms}MS`)), ms)
+    ),
+  ]);
+}
 
 function normalizeVietnamese(text: string): string {
   return text
@@ -24,9 +34,10 @@ export async function GET(request: NextRequest) {
     const normQuery = normalizeVietnamese(q);
     const slugQuery = normQuery.replace(/\s+/g, "-");
 
-    // Tìm kiếm trong DB qua Prisma
-    const products = await prisma.product.findMany({
-      where: {
+    // Tìm kiếm trong DB qua Prisma với Timeout bảo vệ
+    const products = await withTimeout(
+      prisma.product.findMany({
+        where: {
         status: "PUBLISHED",
         OR: [
           { title: { contains: q, mode: "insensitive" } },
@@ -55,7 +66,9 @@ export async function GET(request: NextRequest) {
         },
       },
       take: 20,
-    });
+    }),
+    800
+  );
 
     // Tính điểm liên quan (Relevance Scoring)
     const scored = products.map((p) => {
@@ -98,7 +111,39 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ items: topResults });
   } catch (error: any) {
-    console.warn("[SEARCH_SUGGEST_ERROR]", error.message);
-    return NextResponse.json({ items: [] });
+    console.warn("[SEARCH_SUGGEST_FALLBACK]", error.message);
+    const { searchParams } = new URL(request.url);
+    const q = searchParams.get("q")?.trim() || "";
+    const normQuery = normalizeVietnamese(q);
+
+    const fallbackItems = ALL_PRODUCTS
+      .filter((p) => {
+        const normTitle = normalizeVietnamese(p.title);
+        const normBrand = normalizeVietnamese(p.brand || "");
+        const normCat = normalizeVietnamese(p.category || "");
+        return normTitle.includes(normQuery) || normBrand.includes(normQuery) || normCat.includes(normQuery);
+      })
+      .slice(0, 8)
+      .map((p) => ({
+        id: p.id,
+        title: p.title,
+        slug: p.slug,
+        basePrice: p.basePrice,
+        compareAtPrice: p.compareAtPrice,
+        primaryImage: p.primaryImage,
+        categoryName: p.category,
+        brandName: p.brand,
+        score: 50,
+      }));
+
+    return NextResponse.json(
+      { items: fallbackItems },
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+          "X-Data-Source": "mock-fallback",
+        },
+      }
+    );
   }
 }

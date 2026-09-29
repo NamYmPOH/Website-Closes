@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import { formatCurrency } from "@/lib/utils/format";
 import { useSession, signOut } from "next-auth/react";
 import {
   DollarSign,
@@ -225,7 +227,7 @@ export default function AdminDashboardPage() {
             </div>
             <div className="flex items-baseline justify-between">
               <span className="text-2xl font-bold">
-                {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(metrics.totalRevenue)}
+                {formatCurrency(metrics.totalRevenue)}
               </span>
               <span className="text-xs text-green-600 font-semibold flex items-center">
                 {metrics.deliveredOrders} hoàn thành
@@ -383,7 +385,7 @@ export default function AdminDashboardPage() {
                         </td>
                         <td className="p-3 font-semibold">
                           <div>
-                            {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(totalVal)}
+                            {formatCurrency(totalVal)}
                           </div>
                           {order.pointsEarned ? (
                             <span className="text-[10px] text-emerald-600">
@@ -618,11 +620,13 @@ export default function AdminDashboardPage() {
             {ALL_PRODUCTS.map((prod) => (
               <div key={prod.id} className="p-4 border border-border rounded-lg space-y-2 flex flex-col justify-between bg-background">
                 <div>
-                  <img src={prod.primaryImage} alt="" className="w-full h-36 object-cover rounded bg-neutral-100 mb-2" />
+                  <div className="relative w-full h-36 rounded bg-neutral-100 dark:bg-neutral-800 mb-2 overflow-hidden">
+                    <Image src={prod.primaryImage} alt={prod.title} fill sizes="(max-width: 768px) 100vw, 25vw" className="object-cover" />
+                  </div>
                   <span className="text-[10px] uppercase font-bold text-muted">{prod.brand}</span>
                   <h4 className="text-xs font-semibold line-clamp-1">{prod.title}</h4>
                   <p className="text-xs font-bold mt-1">
-                    {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(prod.basePrice)}
+                    {formatCurrency(prod.basePrice)}
                   </p>
                 </div>
                 <div className="flex justify-between items-center text-[11px] pt-2 border-t border-border text-muted">

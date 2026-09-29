@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
+import { formatCurrency } from "@/lib/utils/format";
 import { useSession } from "next-auth/react";
 import { useCartStore } from "@/stores/cartStore";
 import AddressAutocomplete, { AddressData } from "@/components/storefront/AddressAutocomplete";
@@ -658,23 +660,25 @@ export default function CheckoutPage() {
             <div className="divide-y divide-border max-h-72 overflow-y-auto pr-1 text-xs">
               {items.map((item, idx) => (
                 <div key={`${item.product.id}-${idx}`} className="py-3 flex items-center gap-3">
-                  <img
-                    src={item.product.primaryImage}
-                    alt={item.product.title}
-                    className="w-12 h-16 object-cover rounded bg-neutral-100 flex-shrink-0"
-                  />
+                  <div className="relative w-12 h-16 rounded bg-neutral-100 dark:bg-neutral-800 overflow-hidden shrink-0">
+                    <Image
+                      src={item.product.primaryImage}
+                      alt={item.product.title}
+                      fill
+                      sizes="48px"
+                      className="object-cover"
+                    />
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <h4 className="font-semibold truncate">{item.product.title}</h4>
+                    <h4 className="font-semibold truncate text-foreground">{item.product.title}</h4>
                     <div className="flex items-center gap-2 text-muted text-[11px] mt-0.5">
                       <span>SL: {item.quantity}</span>
                       {item.selectedColor && <span>• Màu: {item.selectedColor}</span>}
                       {item.selectedSize && <span>• Size: {item.selectedSize}</span>}
                     </div>
                   </div>
-                  <span className="font-bold">
-                    {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(
-                      item.product.basePrice * item.quantity
-                    )}
+                  <span className="font-bold text-foreground">
+                    {formatCurrency(item.product.basePrice * item.quantity)}
                   </span>
                 </div>
               ))}
@@ -693,7 +697,7 @@ export default function CheckoutPage() {
                     <div>
                       <span className="font-mono font-bold tracking-wider">{couponCode}</span>
                       <p className="text-[10px] text-emerald-700 dark:text-emerald-400">
-                        Đã giảm: -{new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(discount)}
+                        Đã giảm: -{formatCurrency(discount)}
                       </p>
                     </div>
                   </div>
@@ -752,29 +756,27 @@ export default function CheckoutPage() {
               <div className="flex justify-between text-muted">
                 <span>Tạm tính</span>
                 <span className="font-semibold text-foreground">
-                  {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(subtotal)}
+                  {formatCurrency(subtotal)}
                 </span>
               </div>
               {discount > 0 && (
                 <div className="flex justify-between text-emerald-600 font-medium">
                   <span>Giảm giá voucher {couponCode ? `(${couponCode})` : ""}</span>
                   <span>
-                    -{new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(discount)}
+                    -{formatCurrency(discount)}
                   </span>
                 </div>
               )}
               <div className="flex justify-between text-muted">
                 <span>Phí vận chuyển</span>
                 <span>
-                  {shippingFee === 0
-                    ? "Miễn phí"
-                    : new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(shippingFee)}
+                  {shippingFee === 0 ? "Miễn phí" : formatCurrency(shippingFee)}
                 </span>
               </div>
               <div className="flex justify-between text-base font-bold border-t border-border pt-3">
-                <span>Tổng cộng</span>
-                <span className="text-lg">
-                  {new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(total)}
+                <span className="text-foreground">Tổng cộng</span>
+                <span className="text-lg text-foreground font-bold">
+                  {formatCurrency(total)}
                 </span>
               </div>
             </div>
