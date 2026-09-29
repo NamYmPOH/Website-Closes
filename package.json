@@ -17,6 +17,7 @@
     "@prisma/client": "^5.18.0",
     "@stripe/stripe-js": "^4.4.0",
     "@tanstack/react-query": "^5.52.1",
+    "@vercel/speed-insights": "^2.0.0",
     "bcryptjs": "^2.4.3",
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
