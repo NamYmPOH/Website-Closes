@@ -399,12 +399,14 @@ export async function GET(request: NextRequest) {
           hasNextPage: page * limit < totalCount,
           hasPrevPage: page > 1,
         },
+        _debugError: error instanceof Error ? error.message : String(error),
       },
       {
         status: 200,
         headers: {
-          "Cache-Control": "public, s-maxage=30, stale-while-revalidate=60",
+          "Cache-Control": "no-store, no-cache, must-revalidate",
           "X-Data-Source": "mock-fallback",
+          "X-Fallback-Error": encodeURIComponent((error?.message || "unknown").slice(0, 150)),
         },
       }
     );
