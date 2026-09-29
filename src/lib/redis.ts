@@ -5,28 +5,30 @@ declare global {
   var cachedRedis: Redis | undefined;
 }
 
-const redisUrl = process.env.REDIS_URL || "redis://localhost:6379";
+const redisUrl = process.env.REDIS_URL;
 
-export const redis =
+export const redis: Redis | null =
   global.cachedRedis ||
-  new Redis(redisUrl, {
-    maxRetriesPerRequest: 1,
-    enableReadyCheck: false,
-    lazyConnect: true,
-    enableOfflineQueue: false,
-    retryStrategy: () => null, // Không reconnect liên tục nếu offline
+  (redisUrl
+    ? new Redis(redisUrl, {
+        maxRetriesPerRequest: 1,
+        enableReadyCheck: false,
+        lazyConnect: true,
+        enableOfflineQueue: false,
+        retryStrategy: () => null,
+      })
+    : null);
+
+if (redis) {
+  redis.on("error", (err) => {
+    if (process.env.NODE_ENV === "development") {
+      console.debug("[Redis Offline]:", err.message);
+    }
   });
 
-// Bắt lỗi error event để tránh Unhandled Error Event khi Redis offline
-redis.on("error", (err) => {
-  // Chỉ log nhẹ dạng debug khi đang ở development
-  if (process.env.NODE_ENV === "development") {
-    console.debug("[Redis Offline]:", err.message);
+  if (process.env.NODE_ENV !== "production") {
+    global.cachedRedis = redis;
   }
-});
-
-if (process.env.NODE_ENV !== "production") {
-  global.cachedRedis = redis;
 }
 
 /**
@@ -37,6 +39,10 @@ export async function getOrSetCache<T>(
   fetchFn: () => Promise<T>,
   ttlSeconds: number = 300
 ): Promise<T> {
+  if (!redis) {
+    return fetchFn();
+  }
+
   try {
     const cached = await redis.get(key);
     if (cached) {
@@ -58,6 +64,7 @@ export async function getOrSetCache<T>(
 }
 
 export async function invalidateCachePattern(pattern: string): Promise<void> {
+  if (!redis) return;
   try {
     const keys = await redis.keys(pattern);
     if (keys.length > 0) {

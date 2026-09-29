@@ -4,7 +4,7 @@ import { getOrSetCache } from "@/lib/redis";
 import { Prisma } from "@prisma/client";
 import { ALL_PRODUCTS } from "@/lib/products-data";
 
-function withTimeout<T>(promise: Promise<T>, ms: number = 3500): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number = 9500): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
@@ -14,6 +14,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number = 3500): Promise<T> {
 }
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 15;
 
 function normalizeVietnamese(text: string): string {
   return text
@@ -295,7 +296,7 @@ export async function GET(request: NextRequest) {
       },
       60 // 1 phút caching
     ),
-    3500 // Timeout 3.5s cho kết nối database từ xa Supabase
+    9500 // Timeout 9.5s cho kết nối database từ xa Supabase
   );
 
     return NextResponse.json(result, {

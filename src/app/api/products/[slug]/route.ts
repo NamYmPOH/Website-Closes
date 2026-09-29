@@ -3,8 +3,9 @@ import prisma from "@/lib/prisma";
 import { getProductBySlug, ALL_PRODUCTS } from "@/lib/products-data";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 15;
 
-function withTimeout<T>(promise: Promise<T>, ms: number = 3500): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number = 9500): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
@@ -64,7 +65,7 @@ export async function GET(
         },
       },
     }),
-    3500
+    9500
   );
 
     if (!product) {
